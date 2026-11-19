@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, Response
 from app.db import SessionLocal
 from app.models import Venta, Comprador
 from app.schemas import CrearVenta, CrearComprador
-from app.security import identidad, vendedor, propietario
+from app.security import autorizar_venta, identidad, propietario, vendedor
 from app.errors import ApiError
 from app.services import venta_service as service
 # Crea el agrupador de rutas HTTP con prefijo /api.
@@ -30,7 +30,7 @@ def crear_comprador(d: CrearComprador, u=Depends(identidad)):
         return {"id": c.id, "nombre": c.nombre, "correo": c.correo}
 
 
-# Expone POST /api/ventas; requiere JWT y Idempotency-Key.
+# Expone POST /api/ventas; requiere JWT con permiso de venta e Idempotency-Key.
 @router.post("/ventas")
 # Acepta el cuerpo validado, la respuesta y la clave idempotente.
 def crear(d: CrearVenta, response: Response,
@@ -38,10 +38,7 @@ def crear(d: CrearVenta, response: Response,
           idempotency_key: Annotated[str, Header(
               # Limita longitud y caracteres admitidos en la clave.
               min_length=8, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")],
-          # Pide a FastAPI validar la identidad antes de entrar al endpoint.
-          u=Depends(identidad)):
-    # Comprueba permisos de OPERADOR o ADMIN.
-    vendedor(u)
+          u=Depends(autorizar_venta)):
     # Delegación: las reglas y comunicación Java viven en el Service.
     resultado, codigo = service.crear(d, idempotency_key, u)
     # Asigna 201, 200 o 202 según el resultado.

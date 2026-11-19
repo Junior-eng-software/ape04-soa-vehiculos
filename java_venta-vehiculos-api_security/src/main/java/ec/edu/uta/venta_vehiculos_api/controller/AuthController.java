@@ -3,6 +3,7 @@ package ec.edu.uta.venta_vehiculos_api.controller;
 // Importa el DTO que representa la respuesta
 // que se devolverá cuando el token sea generado correctamente.
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.Map;
 
@@ -66,6 +67,15 @@ public class AuthController {
     @Value("${app.security.client-secret}")
     private String clientSecret;
 
+    @Value("${app.security.pwa-client-id}")
+    private String pwaClientId;
+
+    @Value("${app.security.pwa-client-secret}")
+    private String pwaClientSecret;
+
+    private enum Cliente {
+        ORDINARIO, PWA, NO_AUTORIZADO
+    }
 
     // Constructor de AuthController.
     //
@@ -80,16 +90,14 @@ public class AuthController {
     }
     private final UsuarioApiService usuarioApiService;
 
-    private boolean clienteSeguro(String authorization) {
-    // Controla errores sin detener toda la aplicación.
-    try {
-        // Valida las credenciales HTTP Basic con el método existente.
-        return clienteValido(authorization);
-    } catch (IllegalArgumentException ex) {
-        // Basic mal formado: evita un error inesperado 500.
-        return false;
+    private Cliente autenticarCliente(String authorization) {
+        try {
+            return clienteValido(authorization);
+        } catch (IllegalArgumentException ex) {
+            // Basic mal formado.
+            return Cliente.NO_AUTORIZADO;
+        }
     }
-}
 
 
 
@@ -182,13 +190,11 @@ public class AuthController {
         // PRIMERA VALIDACIÓN:
         // comprobar las credenciales de la aplicación cliente.
         //
-        // Se envía todo el encabezado Authorization
-        // al método clienteValido().
-        if (!clienteSeguro(authorization)) {
+        Cliente cliente = autenticarCliente(authorization);
+        if (cliente == Cliente.NO_AUTORIZADO) {
 
 
-            // Si clienteValido() devuelve false,
-            // construimos una respuesta HTTP de error.
+            // Construimos una respuesta HTTP de error.
             return ResponseEntity
 
 
@@ -288,12 +294,12 @@ public class AuthController {
         // 3. username y password son correctos.
 
 
-        // Define el permiso que tendrá el token.
-        //
-        // Este valor será guardado como claim:
-        //
-        // "scope": "secret"
-        String scope = "vehiculos";
+        String scopeBase = "vehiculos";
+        String rol = usuario.getRol();
+        String scope = scopeBase;
+        if (cliente == Cliente.PWA && ("OPERADOR".equals(rol) || "ADMIN".equals(rol))) {
+            scope += " " + JwtService.PERMISO_CREAR_VENTA;
+        }
 
 
         // Operador ternario:
@@ -324,7 +330,7 @@ public class AuthController {
 
                         // Permiso que tendrá el token.
                         scope,
-                        usuario.getRol()
+                        rol
                 );
 
 
@@ -339,9 +345,9 @@ public class AuthController {
                         // Identificador de aplicación.
                         idAplicacion,
 
-                        // Scope.
-                        scope,
-                        usuario.getRol()
+                        // El permiso de venta pertenece al access token.
+                        scopeBase,
+                        rol
                 );
 
 
@@ -402,7 +408,7 @@ public class AuthController {
     // las credenciales de la aplicación cliente.
     //
     // Recibe el encabezado Authorization completo.
-    private boolean clienteValido(
+    private Cliente clienteValido(
             String authorization) {
 
 
@@ -416,7 +422,7 @@ public class AuthController {
 
             // Si cualquiera de las condiciones falla,
             // el cliente no es válido.
-            return false;
+            return Cliente.NO_AUTORIZADO;
         }
 
 
@@ -485,7 +491,7 @@ public class AuthController {
 
             // Si no existen dos partes,
             // el formato de las credenciales es incorrecto.
-            return false;
+            return Cliente.NO_AUTORIZADO;
         }
 
 
@@ -514,8 +520,20 @@ public class AuthController {
         // claveCliente sea igual al clientSecret configurado.
         //
         // Ambas condiciones deben cumplirse.
-        return clientId.equals(usuarioCliente) &&
-                clientSecret.equals(claveCliente);
+        if (clientId.equals(usuarioCliente) && mismoSecreto(clientSecret, claveCliente)) {
+            return Cliente.ORDINARIO;
+        }
+        if (!pwaClientId.isBlank() && !pwaClientSecret.isBlank()
+                && !clientId.equals(pwaClientId) && !mismoSecreto(clientSecret, pwaClientSecret)
+                && pwaClientId.equals(usuarioCliente) && mismoSecreto(pwaClientSecret, claveCliente)) {
+            return Cliente.PWA;
+        }
+        return Cliente.NO_AUTORIZADO;
+    }
+
+    private static boolean mismoSecreto(String esperado, String recibido) {
+        return MessageDigest.isEqual(esperado.getBytes(StandardCharsets.UTF_8),
+                recibido.getBytes(StandardCharsets.UTF_8));
     }
 
 

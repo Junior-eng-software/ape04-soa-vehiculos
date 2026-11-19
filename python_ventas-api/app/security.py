@@ -2,7 +2,7 @@
 # Realiza solicitudes HTTP a las APIs Java.
 import httpx
 # Publica endpoints web y valida solicitudes.
-from fastapi import Header
+from fastapi import Depends, Header
 # Importa el componente local correspondiente a esta responsabilidad.
 from app.config import JAVA_URL
 from app.errors import ApiError
@@ -67,6 +67,14 @@ def vendedor(usuario):
     if not {"ROLE_OPERADOR", "ROLE_ADMIN"}.intersection(usuario["roles"]):
         # Notifica un error a la capa responsable de gestionarlo.
         raise ApiError(403, "SIN_PERMISO", "Se requiere OPERADOR o ADMIN")
+
+
+def autorizar_venta(usuario=Depends(identidad)):
+    vendedor(usuario)
+    permisos = usuario.get("permisos")
+    if not isinstance(permisos, list) or "ventas:crear" not in permisos:
+        raise ApiError(403, "SIN_PERMISO", "Se requiere el permiso ventas:crear")
+    return usuario
 
 
 # Comprueba que pueda acceder a registros de ese usuario.

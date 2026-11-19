@@ -37,9 +37,21 @@ def sistema(monkeypatch):
     estado={'reservas':{},'vehiculos':{1:'DISPONIBLE',2:'DISPONIBLE'},'avisos':[], 'notificaciones_activas':True}
     def identidad(url, **kw):
         assert url.endswith('/api/identidad')
-        auth = kw.get('headers',{}).get('Authorization','')
-        if auth=='Bearer valido':return httpx.Response(200,json={'usuario':'operador','roles':['ROLE_OPERADOR']})
-        if auth=='Bearer consulta':return httpx.Response(200,json={'usuario':'lector','roles':['ROLE_CONSULTA']})
+        auth = kw['headers']['Authorization']
+        operador = {'usuario': 'operador', 'roles': ['ROLE_OPERADOR']}
+        permiso = ['ventas:crear']
+        identidades = {
+            'Bearer valido': {**operador, 'permisos': permiso},
+            'Bearer admin': {'usuario': 'admin', 'roles': ['ROLE_ADMIN'], 'permisos': permiso},
+            'Bearer legado': operador,
+            'Bearer sin_permiso': {**operador, 'permisos': []},
+            'Bearer permiso_malformado': {**operador, 'permisos': 'ventas:crear'},
+            'Bearer permiso_distinto': {**operador, 'permisos': ['ventas:crear:otro']},
+            'Bearer consulta': {'usuario': 'lector', 'roles': ['ROLE_CONSULTA'], 'permisos': []},
+            'Bearer consulta_con_permiso': {'usuario': 'lector', 'roles': ['ROLE_CONSULTA'], 'permisos': permiso},
+        }
+        if auth in identidades:
+            return httpx.Response(200, json=identidades[auth])
         return httpx.Response(401,json={'error':'token inválido'})
     def java(method,url,**kw):
         assert kw['headers']['X-Service-Key']=='clave_prueba_java_con_32_caracteres_1234'
@@ -72,10 +84,11 @@ def sistema(monkeypatch):
     return TestClient(app),estado
 
 
-def test_venta_con_jwt_e_idempotencia(sistema):
+@pytest.mark.parametrize('token', ['valido', 'admin'])
+def test_venta_con_jwt_e_idempotencia(sistema, token):
     client,estado=sistema
     assert client.get('/health').json()=={'status':'UP'}
-    auth={'Authorization':'Bearer valido'}
+    auth={'Authorization': f'Bearer {token}'}
     comprador=client.post('/api/compradores',json={'documento':'1801111111','nombre':'Ana','correo':'ana@ejemplo.com'},headers=auth)
     assert comprador.status_code==201, comprador.text
     cid=comprador.json()['id']
@@ -96,6 +109,39 @@ def test_venta_con_jwt_e_idempotencia(sistema):
     assert no_disponible.status_code==409
 
 
+@pytest.mark.parametrize(('token', 'codigo'), [
+    ('legado', 403),
+    ('sin_permiso', 403),
+    ('permiso_malformado', 403),
+    ('permiso_distinto', 403),
+    ('consulta', 403),
+    ('consulta_con_permiso', 403),
+    ('invalido', 401),
+    ('vencido', 401),
+])
+def test_rechaza_venta_antes_de_crear_reserva(sistema, token, codigo):
+    client, estado = sistema
+    comprador = client.post(
+        '/api/compradores',
+        json={'documento': '1801111111', 'nombre': 'Ana', 'correo': 'ana@ejemplo.com'},
+        headers={'Authorization': 'Bearer legado'},
+    )
+    assert comprador.status_code == 201
+    rechazo = client.post(
+        '/api/ventas',
+        json={'vehiculoId': 1, 'compradorId': comprador.json()['id']},
+        headers={'Authorization': f'Bearer {token}', 'Idempotency-Key': 'laboratorio0004'},
+    )
+    assert rechazo.status_code == codigo
+    assert estado['reservas'] == {}
+    assert estado['vehiculos'][1] == 'DISPONIBLE'
+    assert estado['avisos'] == []
+    from app.db import SessionLocal
+    from app.models import Venta
+    with SessionLocal() as db:
+        assert db.query(Venta).count() == 0
+
+
 def test_seguridad_validaciones_y_reenvio(sistema):
     client,estado=sistema
     data={'documento':'1805555555','nombre':'Ana','correo':'ana@ejemplo.com'}
@@ -111,6 +157,7 @@ def test_seguridad_validaciones_y_reenvio(sistema):
     estado['notificaciones_activas']=True
     from app.worker import ciclo
     ciclo()
-    compr=client.get(f"/api/ventas/{venta.json()['id']}",headers=auth)
+    compr=client.get(f"/api/ventas/{venta.json()['id']}",headers={'Authorization':'Bearer legado'})
+    assert compr.status_code==200
     assert compr.json()['notificacion']=='ENVIADA'
     assert len(estado['avisos'])==1

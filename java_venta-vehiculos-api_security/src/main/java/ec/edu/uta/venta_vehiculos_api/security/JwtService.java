@@ -21,6 +21,7 @@ import io.jsonwebtoken.security.Keys;
 // o en JwtAuthenticationFilter. 
 @Service
 public class JwtService {
+    public static final String PERMISO_CREAR_VENTA = "ventas:crear";
 
 
     // Lee desde application.properties:

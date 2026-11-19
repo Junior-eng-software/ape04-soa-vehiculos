@@ -1,6 +1,7 @@
 package ec.edu.uta.venta_vehiculos_api.security;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -37,10 +38,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     if (!List.of("CONSULTA","OPERADOR","ADMIN").contains(rol))
      // Genera un error de negocio que capturará el manejador.
      throw new IllegalArgumentException("Rol inválido");
+    var autoridades = new ArrayList<SimpleGrantedAuthority>(2);
+    autoridades.add(new SimpleGrantedAuthority("ROLE_" + rol));
+    if (c.get("scope") instanceof String scope
+        && List.of(scope.split(" ")).contains(JwtService.PERMISO_CREAR_VENTA)) {
+     autoridades.add(new SimpleGrantedAuthority(JwtService.PERMISO_CREAR_VENTA));
+    }
     // Guarda temporalmente la identidad autenticada en la petición.
     SecurityContextHolder.getContext().setAuthentication(
-     new UsernamePasswordAuthenticationToken(c.getSubject(),null,
-      List.of(new SimpleGrantedAuthority("ROLE_"+rol))));
+     new UsernamePasswordAuthenticationToken(c.getSubject(), null, autoridades));
    } catch (Exception ex) { SecurityContextHolder.clearContext(); }
   }
   chain.doFilter(req,res);
