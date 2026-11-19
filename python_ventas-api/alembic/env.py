@@ -10,6 +10,10 @@ TABLAS_PYTHON = {"compradores", "ventas"}
 # Referencia las definiciones de entidades SQLAlchemy.
 target_metadata = Base.metadata
 
+# Las migraciones reales y SQL offline pertenecen exclusivamente al nuevo esquema.
+if engine.url.database != "ventas_api":
+    raise RuntimeError("Alembic requiere DB_NAME=ventas_api; no migrar el esquema legado")
+
 
 # Filtra por nombre las tablas visibles durante autogeneración.
 def incluir_nombre(nombre, tipo, nombres_padre):
@@ -38,7 +42,7 @@ def run_migrations_offline():
     # Configura conexión, metadatos y filtros de Alembic.
     context.configure(
         # Usa la conexión de SQLAlchemy creada con datos de .env.
-        url=str(engine.url),
+        dialect_name=engine.dialect.name,
         # Suministra el modelo ORM como referencia.
         target_metadata=target_metadata,
         # Excluye de comparación las tablas de la API Java.
@@ -52,6 +56,8 @@ def run_migrations_offline():
     )
     # Abre el bloque transaccional de migración.
     with context.begin_transaction():
+        # El SQL exportado tampoco debe depender del esquema seleccionado por el cliente.
+        context.execute("USE ventas_api")
         # Ejecuta las revisiones pendientes.
         context.run_migrations()
 

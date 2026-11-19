@@ -6,7 +6,7 @@
 
 - Windows 10 u 11 y Visual Studio Code.
 - Python 3.13 con `pip` y `venv`.
-- MySQL o XAMPP con la base `venta_vehiculos` disponible.
+- MySQL o XAMPP con el esquema independiente `ventas_api` disponible.
 - API Java de vehículos en `http://127.0.0.1:8080`.
 - Servicio Java de notificaciones en `http://127.0.0.1:8081` para comprobar avisos.
 
@@ -27,12 +27,16 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-4. En `.env` se ajustan los datos de MySQL, las direcciones de Java y notificaciones, `VENTAS_SERVICE_KEY` y `NOTIFICACIONES_KEY`. Los valores deben coincidir con la configuración privada de los servicios Java.
-5. Con MySQL en funcionamiento, se aplican las migraciones incluidas:
+4. En `.env` se configura `DB_NAME=ventas_api`, una cuenta de aplicación restringida a compradores/ventas, las direcciones de Java y notificaciones, `VENTAS_SERVICE_KEY` y `NOTIFICACIONES_KEY`. Las claves deben coincidir con la configuración privada de los servicios Java.
+5. Para una instalación vacía, un DBA ejecuta `sql/001_schema.sql`; el script rechaza un esquema ya existente. Después se aplican las migraciones con una cuenta DBA/de migración, mediante `DB_USER` y `DB_PASSWORD` en el entorno del proceso. Estas variables tienen prioridad sobre `.env`: no sustituir las credenciales privadas de la aplicación ni escribir contraseñas en comandos o archivos versionados. Alembic exige `DB_NAME=ventas_api`:
 
 ```powershell
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
+
+La revisión final es `0002` (`alembic current`). Retirar las variables administrativas del entorno antes de iniciar la API. La cuenta de aplicación no dispone de permisos DDL ni administra `alembic_version`.
+
+Si hay datos legados, no basta con crear tablas: respaldar y comprobar restauración, suspender escrituras y ejecutar `sql/002_copiar_legado.sql` únicamente sobre un destino vacío ya migrado. Comparar todos los campos y secuencias antes del corte; conservar el origen. No ejecutar `downgrade` ni repetir la copia sobre un destino con datos. El DBA prepara los roles con `../sql/003_permisos_servicios.sql` y los asigna como roles predeterminados a cuentas separadas, sin privilegios globales. La preparación inicial no se repite sobre instalaciones existentes.
 
 ## 3. Comprobar el código
 
