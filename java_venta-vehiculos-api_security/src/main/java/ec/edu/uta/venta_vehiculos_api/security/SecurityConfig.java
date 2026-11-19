@@ -51,6 +51,7 @@ public class SecurityConfig {
      r.getWriter().write("{\"title\":\"Sin permiso\",\"status\":403}");
     }))
    .authorizeHttpRequests(a -> a
+    .requestMatchers(HttpMethod.GET,"/actuator/health").permitAll()
     .requestMatchers("/oauth/token").permitAll()
     .requestMatchers("/api/reservas", "/api/reservas/**",
      "/api/vehiculos/*/reservas").hasRole("SERVICIO_VENTAS")
