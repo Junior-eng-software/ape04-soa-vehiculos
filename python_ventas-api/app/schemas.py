@@ -1,4 +1,4 @@
-"""DTO de entrada validados por Pydantic."""
+"""DTO de entrada y de listados validados por Pydantic."""
 # Valida estructuras de entrada y tipos JSON.
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,3 +25,18 @@ class CrearVenta(BaseModel):
     vehiculoId: int = Field(gt=0, strict=True)
     # Requiere ID de comprador entero y positivo.
     compradorId: int = Field(gt=0, strict=True)
+
+
+class CompradorResumen(BaseModel):
+    id: int
+    nombre: str
+
+
+class VentaResumen(BaseModel):
+    id: int
+    vehiculoId: int
+    compradorId: int
+    estado: str
+    precioAcordado: str | None
+    moneda: str | None
+    fechaUTC: str

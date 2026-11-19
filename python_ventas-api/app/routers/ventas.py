@@ -3,11 +3,13 @@
 from typing import Annotated
 # Publica endpoints web y valida solicitudes.
 from fastapi import APIRouter, Depends, Header, Response
+from sqlalchemy import select
 # Importa el componente local correspondiente a esta responsabilidad.
 from app.db import SessionLocal
 from app.models import Venta, Comprador
-from app.schemas import CrearVenta, CrearComprador
-from app.security import autorizar_venta, identidad, propietario, vendedor
+from app.repositories.venta_repository import VentaRepository
+from app.schemas import CompradorResumen, CrearVenta, CrearComprador, VentaResumen
+from app.security import autorizar_venta, filtrar_visibles, identidad, propietario, vendedor
 from app.errors import ApiError
 from app.services import venta_service as service
 # Crea el agrupador de rutas HTTP con prefijo /api.
@@ -30,6 +32,14 @@ def crear_comprador(d: CrearComprador, u=Depends(identidad)):
         return {"id": c.id, "nombre": c.nombre, "correo": c.correo}
 
 
+@router.get("/compradores", response_model=list[CompradorResumen])
+def listar_compradores(u=Depends(identidad)):
+    vendedor(u)
+    consulta = select(Comprador.id, Comprador.nombre).order_by(Comprador.id)
+    with SessionLocal() as db:
+        return db.execute(filtrar_visibles(consulta, Comprador.usuario, u)).mappings().all()
+
+
 # Expone POST /api/ventas; requiere JWT con permiso de venta e Idempotency-Key.
 @router.post("/ventas")
 # Acepta el cuerpo validado, la respuesta y la clave idempotente.
@@ -47,6 +57,23 @@ def crear(d: CrearVenta, response: Response,
     response.headers["Location"] = f"/api/ventas/{resultado['id']}"
     # Entrega el JSON generado por el servicio.
     return resultado
+
+
+@router.get("/ventas", response_model=list[VentaResumen])
+def listar_ventas(u=Depends(identidad)):
+    if not {"ROLE_CONSULTA", "ROLE_OPERADOR", "ROLE_ADMIN"}.intersection(u["roles"]):
+        raise ApiError(403, "SIN_PERMISO", "Se requiere CONSULTA, OPERADOR o ADMIN")
+    with SessionLocal() as db:
+        filas = VentaRepository(db).listar_visibles(u)
+        return [
+            VentaResumen(
+                id=v.id, vehiculoId=v.vehiculo_id, compradorId=v.comprador_id,
+                estado=v.estado,
+                precioAcordado=str(v.precio_acordado) if v.precio_acordado is not None else None,
+                moneda=v.moneda, fechaUTC=v.fecha.isoformat() + "Z",
+            )
+            for v in filas
+        ]
 
 
 # Expone GET /api/ventas/{id} para consultar la operación.

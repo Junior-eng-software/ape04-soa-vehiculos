@@ -3,6 +3,7 @@
 import httpx
 # Publica endpoints web y valida solicitudes.
 from fastapi import Depends, Header
+from sqlalchemy import LargeBinary, cast, literal
 # Importa el componente local correspondiente a esta responsabilidad.
 from app.config import JAVA_URL
 from app.errors import ApiError
@@ -75,6 +76,17 @@ def autorizar_venta(usuario=Depends(identidad)):
     if not isinstance(permisos, list) or "ventas:crear" not in permisos:
         raise ApiError(403, "SIN_PERMISO", "Se requiere el permiso ventas:crear")
     return usuario
+
+
+def filtrar_visibles(consulta, columna_usuario, usuario):
+    if "ROLE_ADMIN" in usuario["roles"]:
+        return consulta
+    nombre = usuario["usuario"]
+    # La comparación binaria conserva la igualdad exacta de propietario bajo colaciones MySQL insensibles a mayúsculas.
+    return consulta.where(
+        columna_usuario == nombre,
+        cast(columna_usuario, LargeBinary) == cast(literal(nombre), LargeBinary),
+    )
 
 
 # Comprueba que pueda acceder a registros de ese usuario.

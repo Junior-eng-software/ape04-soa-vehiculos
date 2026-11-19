@@ -2,6 +2,8 @@
 import importlib
 import os
 import sys
+from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -28,6 +30,9 @@ def sistema(monkeypatch):
             del sys.modules[name]
     from app.db import Base
     from app import models
+    # Simula una colación que equipara nombres con distintas mayúsculas.
+    for modelo in (models.Comprador, models.Venta):
+        modelo.__table__.c.usuario.type.collation = 'NOCASE'
     Base.metadata.create_all(engine)
     from app.main import app
     import app.services.venta_service as svc
@@ -49,6 +54,8 @@ def sistema(monkeypatch):
             'Bearer permiso_distinto': {**operador, 'permisos': ['ventas:crear:otro']},
             'Bearer consulta': {'usuario': 'lector', 'roles': ['ROLE_CONSULTA'], 'permisos': []},
             'Bearer consulta_con_permiso': {'usuario': 'lector', 'roles': ['ROLE_CONSULTA'], 'permisos': permiso},
+            'Bearer sin_datos': {'usuario': 'nuevo', 'roles': ['ROLE_OPERADOR']},
+            'Bearer rol_ajeno': {'usuario': 'operador', 'roles': ['ROLE_SERVICIO_VENTAS']},
         }
         if auth in identidades:
             return httpx.Response(200, json=identidades[auth])
@@ -161,3 +168,98 @@ def test_seguridad_validaciones_y_reenvio(sistema):
     assert compr.status_code==200
     assert compr.json()['notificacion']=='ENVIADA'
     assert len(estado['avisos'])==1
+
+
+@pytest.fixture
+def registros_visibles(sistema):
+    from app.db import SessionLocal
+    from app.models import Comprador, Venta
+
+    with SessionLocal.begin() as db:
+        db.add_all([
+            Comprador(id=1, usuario='operador', nombre='Comprador uno',
+                      documento='PRUEBA-1', correo='uno@example.test'),
+            Comprador(id=2, usuario='OPERADOR', nombre='Comprador dos',
+                      documento='PRUEBA-2', correo='dos@example.test'),
+            Comprador(id=3, usuario='admin', nombre='Comprador tres',
+                      documento='PRUEBA-3', correo='tres@example.test'),
+        ])
+        db.flush()
+        for id_, usuario, comprador_id in [
+            (1, 'operador', 1), (2, 'lector', 3), (3, 'OPERADOR', 2), (4, 'admin', 1),
+        ]:
+            db.add(Venta(
+                id=id_, usuario=usuario, comprador_id=comprador_id, vehiculo_id=id_ + 100,
+                operacion_id=f'operacion-prueba-{id_}', idempotency_key=f'clave-prueba-{id_}',
+                request_hash='0' * 64, fecha=datetime(2024, 1, 2, 12, 30),
+                estado='PENDIENTE' if id_ == 2 else 'COMPLETADA',
+                precio_acordado=None if id_ == 2 else Decimal('18000.00'),
+                moneda=None if id_ == 2 else 'USD',
+            ))
+    return sistema
+
+
+@pytest.mark.parametrize(('token', 'codigo', 'ids'), [
+    ('consulta', 403, []),
+    ('legado', 200, [1]),
+    ('admin', 200, [1, 2, 3]),
+    ('sin_datos', 200, []),
+    ('rol_ajeno', 403, []),
+])
+def test_lista_compradores_segun_rol(registros_visibles, token, codigo, ids):
+    client, _ = registros_visibles
+    respuesta = client.get('/api/compradores', headers={'Authorization': f'Bearer {token}'})
+    assert respuesta.status_code == codigo
+    if codigo == 200:
+        nombres = {1: 'Comprador uno', 2: 'Comprador dos', 3: 'Comprador tres'}
+        assert respuesta.json() == [{'id': id_, 'nombre': nombres[id_]} for id_ in ids]
+
+
+@pytest.mark.parametrize(('token', 'ids'), [
+    ('consulta', [2]), ('legado', [1]), ('admin', [1, 2, 3, 4]), ('sin_datos', []),
+])
+def test_lista_ventas_segun_rol_y_contrato(registros_visibles, token, ids):
+    client, estado = registros_visibles
+    headers = {'Authorization': f'Bearer {token}'}
+    respuesta = client.get('/api/ventas', headers=headers)
+    assert respuesta.status_code == 200
+    campos = {'id', 'vehiculoId', 'compradorId', 'estado', 'precioAcordado', 'moneda', 'fechaUTC'}
+    assert [venta['id'] for venta in respuesta.json()] == ids
+    for venta in respuesta.json():
+        assert set(venta) == campos
+        detalle = client.get(f"/api/ventas/{venta['id']}", headers=headers)
+        assert detalle.status_code == 200
+        assert venta == {campo: detalle.json()[campo] for campo in campos}
+    if token == 'legado':
+        assert client.get('/api/ventas/3', headers=headers).status_code == 403
+    if token == 'consulta':
+        venta = respuesta.json()[0]
+        assert (venta['estado'], venta['precioAcordado'], venta['moneda']) == ('PENDIENTE', None, None)
+        assert client.get('/api/ventas/1', headers=headers).status_code == 403
+    assert estado['reservas'] == {}
+    assert estado['avisos'] == []
+
+
+@pytest.mark.parametrize('ruta', ['/api/compradores', '/api/ventas'])
+@pytest.mark.parametrize(('auth', 'codigo'), [
+    ({}, 401),
+    ({'Authorization': 'Bearer invalido'}, 401),
+    ({'Authorization': 'Bearer rol_ajeno'}, 403),
+])
+def test_listados_rechazan_acceso_no_autorizado(sistema, ruta, auth, codigo):
+    client, _ = sistema
+    assert client.get(ruta, headers=auth).status_code == codigo
+
+
+def test_filtro_de_propietario_con_dialecto_mysql(sistema):
+    from sqlalchemy import select
+    from sqlalchemy.dialects import mysql
+    from app.models import Venta
+    from app.security import filtrar_visibles
+
+    consulta = filtrar_visibles(
+        select(Venta.id), Venta.usuario, {'usuario': 'operador', 'roles': ['ROLE_OPERADOR']},
+    )
+    compilada = consulta.compile(dialect=mysql.dialect())
+    assert 'ventas.usuario = %s AND CAST(ventas.usuario AS BINARY) = CAST(%s AS BINARY)' in str(compilada)
+    assert list(compilada.params.values()) == ['operador', 'operador']

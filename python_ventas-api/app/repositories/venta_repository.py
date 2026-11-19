@@ -1,8 +1,9 @@
-"""Consultas SQLAlchemy para el seguimiento e idempotencia de ventas."""
+"""Consultas SQLAlchemy para listados, seguimiento e idempotencia de ventas."""
 # Ofrece ORM, consultas y transacciones SQL.
 from sqlalchemy import select, or_
 # Importa el componente local correspondiente a esta responsabilidad.
 from app.models import Venta
+from app.security import filtrar_visibles
 
 
 # Aísla las consultas SQLAlchemy del resto de la aplicación.
@@ -12,6 +13,13 @@ class VentaRepository:
     def __init__(self, db):
         # Almacena la sesión para realizar las consultas.
         self.db = db
+
+    def listar_visibles(self, usuario):
+        consulta = select(
+            Venta.id, Venta.vehiculo_id, Venta.comprador_id, Venta.estado,
+            Venta.precio_acordado, Venta.moneda, Venta.fecha,
+        ).order_by(Venta.id)
+        return self.db.execute(filtrar_visibles(consulta, Venta.usuario, usuario)).all()
 
     # Busca una venta previa perteneciente al usuario y clave indicados.
     def por_clave(self, usuario, clave):
