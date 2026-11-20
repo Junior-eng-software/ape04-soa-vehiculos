@@ -11,6 +11,14 @@ partial class FormPrincipal
     private Label lblEstado = null!;
     private Label lblTotal = null!;
     private DataGridView dgvVehiculos = null!;
+    private TextBox txtMarca = null!;
+    private TextBox txtModelo = null!;
+    private TextBox txtPlaca = null!;
+    private TextBox txtChasis = null!;
+    private TextBox txtAnio = null!;
+    private TextBox txtColor = null!;
+    private TextBox txtPrecio = null!;
+    private Button btnRegistrar = null!;
 
     protected override void Dispose(bool disposing)
     {
@@ -32,6 +40,7 @@ partial class FormPrincipal
         lblEstado = new Label();
         lblTotal = new Label();
         dgvVehiculos = new DataGridView();
+        GroupBox registro = CrearControlesRegistro();
         ((System.ComponentModel.ISupportInitialize)dgvVehiculos).BeginInit();
         SuspendLayout();
         // 
@@ -94,7 +103,7 @@ partial class FormPrincipal
         lblEstado.ForeColor = Color.FromArgb(50, 64, 76);
         lblEstado.Location = new Point(268, 202);
         lblEstado.Name = "lblEstado";
-        lblEstado.Size = new Size(254, 36);
+        lblEstado.Size = new Size(737, 42);
         lblEstado.TabIndex = 3;
         lblEstado.Text = "Bandera";
         lblEstado.TextAlign = ContentAlignment.MiddleLeft;
@@ -103,7 +112,7 @@ partial class FormPrincipal
         // 
         lblTotal.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         lblTotal.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-        lblTotal.Location = new Point(30, 626);
+        lblTotal.Location = new Point(30, 786);
         lblTotal.Name = "lblTotal";
         lblTotal.Size = new Size(975, 30);
         lblTotal.TabIndex = 4;
@@ -120,7 +129,7 @@ partial class FormPrincipal
         dgvVehiculos.BackgroundColor = Color.White;
         dgvVehiculos.ColumnHeadersHeight = 38;
         dgvVehiculos.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-        dgvVehiculos.Location = new Point(30, 264);
+        dgvVehiculos.Location = new Point(30, 424);
         dgvVehiculos.MultiSelect = false;
         dgvVehiculos.Name = "dgvVehiculos";
         dgvVehiculos.ReadOnly = true;
@@ -129,30 +138,76 @@ partial class FormPrincipal
         dgvVehiculos.RowTemplate.Height = 30;
         dgvVehiculos.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         dgvVehiculos.Size = new Size(975, 350);
-        dgvVehiculos.TabIndex = 2;
+        dgvVehiculos.TabIndex = 3;
         // 
         // FormPrincipal
         // 
         AutoScaleDimensions = new SizeF(9F, 23F);
         AutoScaleMode = AutoScaleMode.Font;
         BackColor = Color.White;
-        ClientSize = new Size(1037, 675);
+        ClientSize = new Size(1037, 835);
         Controls.Add(lblTitulo);
         Controls.Add(lblSubtitulo);
         Controls.Add(lblToken);
         Controls.Add(txtToken);
         Controls.Add(btnConsultar);
         Controls.Add(lblEstado);
+        Controls.Add(registro);
         Controls.Add(dgvVehiculos);
         Controls.Add(lblTotal);
         Font = new Font("Segoe UI", 10F);
-        MinimumSize = new Size(940, 540);
+        MinimumSize = new Size(940, 700);
         Name = "FormPrincipal";
         StartPosition = FormStartPosition.CenterScreen;
         Text = "Form1";
         ((System.ComponentModel.ISupportInitialize)dgvVehiculos).EndInit();
         ResumeLayout(false);
         PerformLayout();
+    }
+
+    private GroupBox CrearControlesRegistro()
+    {
+        var grupo = new GroupBox
+        {
+            Text = "Registrar vehículo",
+            Location = new Point(30, 250),
+            Size = new Size(975, 156),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            TabIndex = 2,
+            Padding = new Padding(10, 6, 10, 8)
+        };
+        var campos = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 4 };
+        for (int i = 0; i < 4; i++)
+        {
+            campos.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+            campos.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        }
+        txtMarca = AgregarCampo("Marca", 0, 0);
+        txtModelo = AgregarCampo("Modelo", 1, 0);
+        txtPlaca = AgregarCampo("Placa", 2, 0);
+        txtChasis = AgregarCampo("Chasis (17 caracteres)", 3, 0);
+        txtChasis.MaxLength = 17;
+        txtAnio = AgregarCampo("Año", 0, 2);
+        txtColor = AgregarCampo("Color (opcional)", 1, 2);
+        txtPrecio = AgregarCampo("Precio", 2, 2);
+        btnRegistrar = new Button
+        {
+            Text = "Registrar vehículo", AutoSize = true,
+            Dock = DockStyle.Fill, TabIndex = 14, UseVisualStyleBackColor = true
+        };
+        btnRegistrar.Click += btnRegistrar_Click;
+        campos.Controls.Add(btnRegistrar, 3, 3);
+        grupo.Controls.Add(campos);
+        return grupo;
+
+        TextBox AgregarCampo(string texto, int columna, int fila)
+        {
+            int orden = fila * 4 + columna * 2;
+            campos.Controls.Add(new Label { Text = texto, AutoSize = true, TabIndex = orden }, columna, fila);
+            var entrada = new TextBox { AccessibleName = texto, Dock = DockStyle.Fill, TabIndex = orden + 1 };
+            campos.Controls.Add(entrada, columna, fila + 1);
+            return entrada;
+        }
     }
 
     private static DataGridViewTextBoxColumn Columna(
