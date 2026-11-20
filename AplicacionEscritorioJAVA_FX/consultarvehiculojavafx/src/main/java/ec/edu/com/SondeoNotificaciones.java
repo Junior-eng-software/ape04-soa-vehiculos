@@ -11,6 +11,7 @@ final class SondeoNotificaciones {
     private final Consumer<Runnable> ejecutarEnUi;
     private final BiConsumer<NotificacionesApiClient.Resultado, Throwable> recibir;
     private String jwt = "";
+    private boolean bloqueado;
     private CompletableFuture<NotificacionesApiClient.Resultado> pendiente;
 
     SondeoNotificaciones(Function<String, CompletableFuture<NotificacionesApiClient.Resultado>> consultar,
@@ -29,8 +30,12 @@ final class SondeoNotificaciones {
         actualizar();
     }
 
+    boolean puedeActualizar() {
+        return !jwt.isBlank() && !bloqueado && pendiente == null;
+    }
+
     void actualizar() {
-        if (jwt.isBlank() || pendiente != null) {
+        if (!puedeActualizar()) {
             return;
         }
         CompletableFuture<NotificacionesApiClient.Resultado> consulta;
@@ -46,6 +51,9 @@ final class SondeoNotificaciones {
                 ejecutarEnUi.accept(() -> {
                     if (pendiente == actual) {
                         pendiente = null;
+                        var estado = PresentacionAvisos.estado(resultado, error);
+                        bloqueado = estado == PresentacionAvisos.Estado.JWT_RECHAZADO
+                            || estado == PresentacionAvisos.Estado.ACCESO_DENEGADO;
                         recibir.accept(resultado, error);
                     }
                 });
@@ -55,6 +63,7 @@ final class SondeoNotificaciones {
 
     void detener() {
         jwt = "";
+        bloqueado = false;
         var consulta = pendiente;
         pendiente = null;
         if (consulta != null) {

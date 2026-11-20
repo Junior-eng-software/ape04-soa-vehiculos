@@ -1,0 +1,80 @@
+.espacio-trabajo {
+    -app-fondo: #f5f6f2;
+    -app-superficie: #ffffff;
+    -app-texto: #202520;
+    -app-secundario: #586356;
+    -app-borde: #dbe1d6;
+    -app-acento: #4c641a;
+    -app-acento-suave: #eef4db;
+    -app-error: #8b3029;
+    -app-error-fondo: #fbefed;
+    -fx-background-color: -app-fondo;
+    -fx-font-family: "Segoe UI";
+    -fx-font-size: 15px;
+    -fx-padding: 24px;
+    -fx-focus-color: -app-acento;
+    -fx-faint-focus-color: -app-acento-suave;
+}
+
+.label { -fx-text-fill: -app-texto; }
+.titulo-principal { -fx-font-size: 27px; -fx-font-weight: bold; }
+.titulo-seccion { -fx-font-size: 19px; -fx-font-weight: bold; }
+.texto-secundario { -fx-text-fill: -app-secundario; -fx-font-size: 13px; }
+
+.barra-sesion, .panel {
+    -fx-background-color: -app-superficie;
+    -fx-border-color: -app-borde;
+    -fx-background-radius: 16px;
+    -fx-border-radius: 16px;
+}
+.barra-sesion { -fx-padding: 10px 14px; }
+.panel { -fx-padding: 16px; }
+.button, .password-field {
+    -fx-background-color: -app-superficie;
+    -fx-border-color: -app-borde;
+    -fx-background-radius: 9px;
+    -fx-border-radius: 9px;
+    -fx-text-fill: -app-texto;
+    -fx-padding: 6px 12px;
+}
+.password-field { -fx-prompt-text-fill: -app-secundario; }
+.button:hover, .accion-principal { -fx-background-color: -app-acento-suave; -fx-text-fill: -app-acento; }
+.accion-secundaria { -fx-text-fill: -app-secundario; -fx-font-size: 13px; }
+.button:focused, .password-field:focused { -fx-border-color: -app-acento; }
+
+.tab-pane > .tab-header-area > .tab-header-background { -fx-background-color: transparent; }
+.tab-pane > .tab-header-area { -fx-padding: 0 0 8px 0; }
+.tab-pane .tab {
+    -fx-background-color: -app-superficie;
+    -fx-background-radius: 9px;
+    -fx-padding: 6px 14px;
+}
+.tab-pane .tab .tab-label { -fx-text-fill: -app-secundario; }
+.tab-pane .tab:selected { -fx-background-color: -app-acento-suave; }
+.tab-pane .tab:selected .tab-label { -fx-text-fill: -app-acento; -fx-font-weight: bold; }
+
+.table-view {
+    -fx-background-color: -app-superficie;
+    -fx-border-color: -app-borde;
+    -fx-border-radius: 9px;
+    -fx-background-radius: 9px;
+    -fx-padding: 2px;
+}
+.table-view .column-header, .table-view .filler { -fx-background-color: -app-fondo; }
+.table-view .column-header .label { -fx-alignment: center-left; -fx-padding: 8px; -fx-text-fill: -app-secundario; }
+.table-row-cell { -fx-background-color: -app-superficie; }
+.table-row-cell:odd:filled { -fx-background-color: -app-fondo; }
+.table-row-cell:filled:selected { -fx-background-color: -app-acento-suave; }
+.table-cell { -fx-alignment: center-left; -fx-text-fill: -app-texto; -fx-padding: 8px; }
+.table-cell.id-venta { -fx-font-weight: bold; }
+.table-cell.estado-venta { -fx-text-fill: -app-acento; -fx-font-weight: bold; }
+
+.barra-estado { -fx-background-color: -app-fondo; -fx-background-radius: 9px; -fx-padding: 8px 12px; }
+.aviso-exito { -fx-text-fill: -app-acento; -fx-font-weight: bold; }
+.aviso-carga, .aviso-vacio, .aviso-sin-sesion { -fx-text-fill: -app-secundario; }
+.aviso-error, .aviso-jwt-rechazado, .aviso-acceso-denegado {
+    -fx-text-fill: -app-error;
+    -fx-background-color: -app-error-fondo;
+    -fx-background-radius: 6px;
+    -fx-padding: 3px 6px;
+}

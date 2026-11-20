@@ -10,6 +10,23 @@ import java.util.concurrent.CompletableFuture;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SondeoNotificacionesTest {
+    @Test
+    void tras401BloqueaElMismoTokenYReanudaConOtro() {
+        sondeo.cambiarSesion("primera");
+        operaciones.get(0).complete(new NotificacionesApiClient.Resultado(401, List.of()));
+        ui.remove().run();
+        assertFalse(sondeo.puedeActualizar());
+        sondeo.actualizar();
+        sondeo.cambiarSesion("primera");
+        sondeo.actualizar();
+        assertEquals(List.of("primera"), peticiones);
+        sondeo.cambiarSesion("segunda");
+        operaciones.get(1).complete(RESPUESTA);
+        ui.remove().run();
+        assertTrue(sondeo.puedeActualizar());
+        sondeo.actualizar();
+        assertEquals(List.of("primera", "segunda", "segunda"), peticiones);
+    }
     private static final NotificacionesApiClient.Resultado RESPUESTA =
         new NotificacionesApiClient.Resultado(200, List.of());
     private final List<String> peticiones = new ArrayList<>();
@@ -28,6 +45,7 @@ class SondeoNotificacionesTest {
         sondeo.actualizar();
         assertTrue(peticiones.isEmpty());
         sondeo.cambiarSesion("primera");
+        assertFalse(sondeo.puedeActualizar());
         for (int i = 0; i < 10; i++) {
             sondeo.actualizar();
         }
