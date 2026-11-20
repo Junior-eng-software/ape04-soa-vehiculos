@@ -27,6 +27,21 @@ class RegistroNotificaciones {
         jdbc.queryForList("SELECT motivo, recibida_utc FROM notificaciones_cuarentena WHERE 1=0");
     }
 
+    void verificarEscritura() {
+        transaccion.executeWithoutResult(status -> {
+            // El sondeo exige lectura y escritura en ambas tablas, sin persistir eventos de prueba.
+            jdbc.update("""
+                INSERT INTO notificaciones_ventas (evento_id, tipo, venta_id, vehiculo_id, fecha_utc)
+                SELECT evento_id, tipo, venta_id, vehiculo_id, fecha_utc FROM notificaciones_ventas WHERE 1=0
+                """);
+            jdbc.update("""
+                INSERT INTO notificaciones_cuarentena (motivo, recibida_utc)
+                SELECT motivo, recibida_utc FROM notificaciones_cuarentena WHERE 1=0
+                """);
+            status.setRollbackOnly();
+        });
+    }
+
     void guardar(EventoVenta evento) {
         try {
             transaccion.executeWithoutResult(status -> jdbc.update("""

@@ -118,14 +118,45 @@ class ConsumidorVentasTest {
     }
 
     @Test
-    void falloPersistenteReencolaTrasTresIntentosSinAck() throws Exception {
+    void falloPersistenteSolicitaParadaTrasTresIntentosSinAckNiNack() throws Exception {
         Channel canal = mock(Channel.class);
         RegistroNotificaciones sinBase = mock(RegistroNotificaciones.class);
+        Runnable parar = mock(Runnable.class);
+        Runnable recuperada = mock(Runnable.class);
         doThrow(new DataAccessResourceFailureException("fallo simulado")).when(sinBase).guardar(any());
-        consumidor(sinBase).recibir(mensaje(JSON.formatted(ID), 1), canal);
-        verify(sinBase, times(3)).guardar(any());
-        verify(canal).basicNack(1L, false, true);
+        consumidor(sinBase, parar, recuperada).recibir(mensaje(JSON.formatted(ID), 1), canal);
+        var orden = inOrder(sinBase, parar);
+        orden.verify(sinBase, times(3)).guardar(any());
+        orden.verify(parar).run();
+        verifyNoInteractions(canal, recuperada);
+    }
+
+    @Test
+    void falloEnCuarentenaSuspendeSinConfirmarYConservaLaReentrega() throws Exception {
+        Channel canal = mock(Channel.class);
+        RegistroNotificaciones intermitente = spy(registro);
+        doThrow(new DataAccessResourceFailureException("fallo simulado"))
+            .doThrow(new DataAccessResourceFailureException("fallo simulado"))
+            .doThrow(new DataAccessResourceFailureException("fallo simulado"))
+            .doCallRealMethod().when(intermitente).guardarCuarentena("JSON_INVALIDO");
+        Runnable parar = mock(Runnable.class);
+        var consumidor = consumidor(intermitente, parar, () -> {});
+        consumidor.recibir(mensaje("{", 1), canal);
+        verify(parar).run();
+        verifyNoInteractions(canal);
+        assertThat(cantidad("notificaciones_cuarentena")).isZero();
+
+        consumidor.recibir(mensaje("{", 2), canal);
+        assertThat(cantidad("notificaciones_cuarentena")).isOne();
+        verify(canal).basicAck(2L, false);
         verifyNoMoreInteractions(canal);
+    }
+
+    @Test
+    void sondeoCompruebaEscrituraEnAmbasTablasSinInsertarFilas() {
+        registro.verificarEscritura();
+        assertThat(cantidad("notificaciones_ventas")).isZero();
+        assertThat(cantidad("notificaciones_cuarentena")).isZero();
     }
 
     @Test
@@ -146,8 +177,12 @@ class ConsumidorVentasTest {
     }
 
     private static ConsumidorVentas consumidor(RegistroNotificaciones registro) {
+        return consumidor(registro, () -> {}, () -> {});
+    }
+
+    private static ConsumidorVentas consumidor(RegistroNotificaciones registro, Runnable parar, Runnable recuperada) {
         return new ConsumidorVentas(registro, new ObjectMapper(),
-            RetryTemplate.builder().maxAttempts(3).noBackoff().build());
+            RetryTemplate.builder().maxAttempts(3).noBackoff().build(), parar, recuperada);
     }
 
     private static Message mensaje(String json, long entrega) {

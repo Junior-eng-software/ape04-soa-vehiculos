@@ -17,10 +17,15 @@ class ConsumidorVentas {
     private final RegistroNotificaciones registro;
     private final ObjectReader lector;
     private final RetryTemplate reintentos;
+    private final Runnable suspenderRecepcion;
+    private final Runnable confirmarRecuperacion;
 
-    ConsumidorVentas(RegistroNotificaciones registro, ObjectMapper mapper, RetryTemplate reintentos) {
+    ConsumidorVentas(RegistroNotificaciones registro, ObjectMapper mapper, RetryTemplate reintentos,
+                     Runnable suspenderRecepcion, Runnable confirmarRecuperacion) {
         this.registro = registro;
         this.reintentos = reintentos;
+        this.suspenderRecepcion = suspenderRecepcion;
+        this.confirmarRecuperacion = confirmarRecuperacion;
         lector = mapper.readerFor(JsonNode.class)
             .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS, DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY);
     }
@@ -38,10 +43,12 @@ class ConsumidorVentas {
                 return null;
             });
         } catch (RuntimeException e) {
-            LOG.warn("Persistencia sin confirmar tras reintentos. Se conserva la entrega para otro intento.");
-            canal.basicNack(entrega, false, true);
+            LOG.warn("Persistencia sin confirmar tras reintentos. Se suspende la recepción.");
+            // Con prefetch 1, la entrega sin ACK retiene el crédito hasta que Spring cierre el canal.
+            suspenderRecepcion.run();
             return;
         }
         canal.basicAck(entrega, false);
+        confirmarRecuperacion.run();
     }
 }

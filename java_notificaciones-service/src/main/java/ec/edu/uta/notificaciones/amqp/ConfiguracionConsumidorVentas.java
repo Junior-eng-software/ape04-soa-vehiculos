@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.retry.support.RetryTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.util.Properties;
 
@@ -48,16 +49,35 @@ class ConfiguracionConsumidorVentas {
     }
 
     @Bean
+    ThreadPoolTaskScheduler planificadorRecuperacionVentas() {
+        var planificador = new ThreadPoolTaskScheduler();
+        planificador.setThreadNamePrefix("ventas-recuperacion-");
+        planificador.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        return planificador;
+    }
+
+    @Bean
+    RecuperacionConsumidor recuperacionConsumidor(ThreadPoolTaskScheduler planificadorRecuperacionVentas,
+                                                   RegistroNotificaciones registro) {
+        return new RecuperacionConsumidor(planificadorRecuperacionVentas, registro::verificarEscritura);
+    }
+
+    @Bean
     SimpleMessageListenerContainer consumidorVentas(CachingConnectionFactory ventasConnectionFactory,
-                                                    RegistroNotificaciones registro, ObjectMapper mapper) {
+                                                    RegistroNotificaciones registro, ObjectMapper mapper,
+                                                    RecuperacionConsumidor recuperacion) {
         var reintentos = RetryTemplate.builder().maxAttempts(3)
             .exponentialBackoff(1000, 2, 4000).retryOn(RuntimeException.class).build();
-        var consumidor = new ConsumidorVentas(registro, mapper, reintentos);
         var listener = new SimpleMessageListenerContainer(ventasConnectionFactory);
         listener.setQueueNames("notificaciones.ventas");
         listener.setAcknowledgeMode(AcknowledgeMode.MANUAL);
         listener.setPrefetchCount(1);
+        listener.setConcurrentConsumers(1);
+        listener.setForceStop(true);
+        listener.setForceCloseChannel(true);
         listener.setAutoDeclare(false);
+        var consumidor = new ConsumidorVentas(registro, mapper, reintentos,
+            () -> recuperacion.suspender(listener), recuperacion::confirmarRecuperacion);
         listener.setMessageListener((ChannelAwareMessageListener) consumidor::recibir);
         return listener;
     }
