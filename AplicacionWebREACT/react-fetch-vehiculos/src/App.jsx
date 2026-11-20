@@ -217,7 +217,7 @@ export default function App() {
           <p className="ayuda">Después de consultar, seleccione el ID de una fila para ver sus datos.</p>
         )}
       </section>
-      <Ventas key={revision} token={token} />
+      <Ventas key={revision} token={token} vehiculos={codigoHttp === 200 || codigoHttp === 204 ? vehiculos : null} />
     </main>
   );
 }
