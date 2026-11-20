@@ -18,6 +18,12 @@ public class NotificacionKeyFilter extends OncePerRequestFilter{
         if(key.length()<32) throw new IllegalArgumentException("Clave no cumple los 32 crt");
         this.key=key;
     }
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest req) {
+        return ("GET".equals(req.getMethod()) || "HEAD".equals(req.getMethod()))
+            && req.getRequestURI().equals(req.getContextPath() + "/api/notificaciones");
+    }
+
      @Override
     protected void doFilterInternal(HttpServletRequest req,
     HttpServletResponse res, FilterChain chain)
@@ -41,4 +47,4 @@ public class NotificacionKeyFilter extends OncePerRequestFilter{
 
  }
 
-} 
+}

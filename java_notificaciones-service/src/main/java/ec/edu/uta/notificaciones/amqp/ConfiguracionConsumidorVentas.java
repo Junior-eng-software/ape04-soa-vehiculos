@@ -10,11 +10,10 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
-import java.util.Properties;
+import javax.sql.DataSource;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "app.consumidor-ventas.activo", havingValue = "true")
@@ -32,17 +31,7 @@ class ConfiguracionConsumidorVentas {
     }
 
     @Bean
-    RegistroNotificaciones registroNotificaciones(Environment entorno) {
-        String host = entorno.getRequiredProperty("NOTIFICACIONES_DB_HOST");
-        int port = entorno.getRequiredProperty("NOTIFICACIONES_DB_PORT", Integer.class);
-        var datos = new DriverManagerDataSource(
-            "jdbc:mariadb://%s:%d/notificaciones_api".formatted(host, port),
-            entorno.getRequiredProperty("NOTIFICACIONES_DB_USER"),
-            entorno.getRequiredProperty("NOTIFICACIONES_DB_PASSWORD"));
-        Properties limites = new Properties();
-        limites.setProperty("connectTimeout", "3000");
-        limites.setProperty("socketTimeout", "5000");
-        datos.setConnectionProperties(limites);
+    RegistroNotificaciones registroNotificaciones(DataSource datos) {
         var registro = new RegistroNotificaciones(datos);
         registro.verificarEsquema();
         return registro;
