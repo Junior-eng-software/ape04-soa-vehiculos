@@ -7,7 +7,39 @@ export function normalizarToken(entrada = '') {
   return String(entrada).trim().replace(/^Bearer\s+/i, '').trim();
 }
 
-export async function listarVehiculos(entradaToken, ejecutarFetch = fetch) {
+export async function iniciarSesion(username, password, ejecutarFetch = fetch, signal) {
+  let respuesta;
+  try {
+    respuesta = await ejecutarFetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ username, password }),
+      cache: 'no-store',
+      signal,
+    });
+  } catch {
+    throw new Error('No se pudo conectar con el servicio de acceso.');
+  }
+  if (respuesta.status !== 200) {
+    const mensajes = {
+      401: 'Usuario o contraseña no válidos.',
+      403: 'Acceso no permitido.',
+      503: 'El inicio de sesión no está disponible.',
+      504: 'El servicio de acceso no respondió a tiempo.',
+    };
+    throw new Error(`HTTP ${respuesta.status}: ${mensajes[respuesta.status] || 'No se pudo completar el acceso.'}`);
+  }
+  const datos = await respuesta.json().catch(() => null);
+  if (typeof datos?.access_token !== 'string'
+      || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(datos.access_token)
+      || !Number.isInteger(datos.expires_in) || datos.expires_in <= 0
+      || datos.expires_in > 2147483) {
+    throw new Error('El servidor devolvió una respuesta de acceso inválida.');
+  }
+  return { jwt: datos.access_token, segundos: datos.expires_in };
+}
+
+export async function listarVehiculos(entradaToken, ejecutarFetch = fetch, signal) {
   const jwt = normalizarToken(entradaToken);
   const encabezados = new Headers({ Accept: 'application/json' });
 
@@ -21,6 +53,7 @@ export async function listarVehiculos(entradaToken, ejecutarFetch = fetch) {
       method: 'GET',
       headers: encabezados,
       cache: 'no-store',
+      signal,
     });
   } catch {
     throw new Error('No se pudo conectar con el servicio. Compruebe la red y Spring Boot.');

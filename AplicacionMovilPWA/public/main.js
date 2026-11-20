@@ -1,17 +1,23 @@
-import { listarVehiculos } from './api.js';
+import { iniciarSesion, listarVehiculos } from './api.js';
+import { crearSesion } from './sesion.js';
 
 // Referencias a los controles de la interfaz móvil.
 const formulario = document.querySelector('#formulario');
-const campoToken = document.querySelector('#jwt');
+const campoUsuario = document.querySelector('#usuario');
+const campoClave = document.querySelector('#clave');
+const botonIngresar = document.querySelector('#ingresar');
+const panelSesion = document.querySelector('#sesion-activa');
 const botonConsultar = document.querySelector('#consultar');
-const botonBorrar = document.querySelector('#borrar');
-const botonMostrar = document.querySelector('#alternarToken');
+const botonCerrar = document.querySelector('#cerrar-sesion');
 const mensaje = document.querySelector('#mensaje');
 const contenedor = document.querySelector('#vehiculos');
 const contador = document.querySelector('#contador');
 const conexion = document.querySelector('#conexion');
 
 const moneda = new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' });
+const sesion = crearSesion();
+let solicitud;
+let temporizador;
 
 function mostrarMensaje(texto, tipo = 'neutro') {
   mensaje.textContent = texto;
@@ -84,44 +90,97 @@ function pintarListado(vehiculos) {
   }
 }
 
+function cerrarSesion(texto, tipo = 'neutro') {
+  solicitud?.abort();
+  solicitud = null;
+  clearTimeout(temporizador);
+  sesion.cerrar();
+  formulario.reset();
+  formulario.hidden = false;
+  panelSesion.hidden = true;
+  botonIngresar.disabled = false;
+  botonConsultar.disabled = false;
+  limpiarListado();
+  mostrarMensaje(texto, tipo);
+}
+
+function sesionVencida() {
+  cerrarSesion('La sesión venció. Inicie sesión de nuevo.', 'error');
+}
+
 formulario.addEventListener('submit', async (evento) => {
   evento.preventDefault();
+  const usuario = campoUsuario.value.trim();
+  if (!usuario || !campoClave.value) {
+    mostrarMensaje('Ingrese usuario y contraseña.', 'error');
+    return;
+  }
+  solicitud?.abort();
+  const actual = new AbortController();
+  solicitud = actual;
+  botonIngresar.disabled = true;
+  mostrarMensaje('Iniciando sesión…');
+
+  try {
+    const acceso = iniciarSesion(usuario, campoClave.value, fetch, actual.signal);
+    campoClave.value = '';
+    const { jwt, segundos } = await acceso;
+    if (actual.signal.aborted) return;
+    sesion.guardar(jwt, segundos);
+    formulario.reset();
+    formulario.hidden = true;
+    panelSesion.hidden = false;
+    botonConsultar.focus();
+    temporizador = setTimeout(sesionVencida, segundos * 1000);
+    mostrarMensaje('Sesión iniciada. Puede consultar los vehículos.', 'exito');
+  } catch (error) {
+    if (!actual.signal.aborted) mostrarMensaje(error.message, 'error');
+  } finally {
+    if (solicitud === actual) {
+      solicitud = null;
+      botonIngresar.disabled = false;
+    }
+  }
+});
+
+botonConsultar.addEventListener('click', async () => {
+  const jwt = sesion.leer();
+  if (!jwt) return sesionVencida();
+
+  solicitud?.abort();
+  const actual = new AbortController();
+  solicitud = actual;
   botonConsultar.disabled = true;
-  botonBorrar.disabled = true;
   limpiarListado();
   mostrarMensaje('Consultando vehículos…');
 
   try {
-    const respuesta = await listarVehiculos(campoToken.value);
+    const respuesta = await listarVehiculos(jwt, fetch, actual.signal);
+    if (actual.signal.aborted) return;
+    if (!sesion.leer()) return sesionVencida();
     pintarListado(respuesta.vehiculos);
     mostrarMensaje(`HTTP ${respuesta.codigoHttp}: ${respuesta.vehiculos.length} vehículo(s) consultado(s).`, 'exito');
   } catch (error) {
+    if (actual.signal.aborted) return;
+    if (error.codigoHttp === 401) {
+      cerrarSesion(error.message + ' Inicie sesión de nuevo.', 'error');
+      return;
+    }
     // Ante fallos se mantienen vacíos los resultados; nunca se inventan datos.
     mostrarMensaje(error.message, 'error');
     contador.textContent = '0 vehículos';
     contenedor.append(crearElemento('p', 'vacio', 'No hay datos disponibles para mostrar.'));
   } finally {
-    botonConsultar.disabled = false;
-    botonBorrar.disabled = false;
+    if (solicitud === actual) {
+      solicitud = null;
+      botonConsultar.disabled = false;
+    }
   }
 });
 
-botonMostrar.addEventListener('click', () => {
-  const revelar = campoToken.type === 'password';
-  campoToken.type = revelar ? 'text' : 'password';
-  botonMostrar.textContent = revelar ? 'Ocultar' : 'Mostrar';
-  botonMostrar.setAttribute('aria-pressed', String(revelar));
-  botonMostrar.setAttribute('aria-label', revelar ? 'Ocultar token' : 'Mostrar token');
-});
-
-botonBorrar.addEventListener('click', () => {
-  campoToken.value = '';
-  campoToken.type = 'password';
-  botonMostrar.textContent = 'Mostrar';
-  botonMostrar.setAttribute('aria-pressed', 'false');
-  botonMostrar.setAttribute('aria-label', 'Mostrar token');
-  mostrarMensaje('Token borrado del formulario.');
-  campoToken.focus();
+botonCerrar.addEventListener('click', () => {
+  cerrarSesion('Sesión cerrada.');
+  campoUsuario.focus();
 });
 
 function actualizarConexion() {

@@ -32,20 +32,22 @@
             <span class="paso">01</span>
             <h2 id="titulo-acceso">Acceso con JWT</h2>
           </div>
-          <p class="ayuda">Se utiliza un token obtenido mediante el servicio de autenticación.</p>
-          <form id="formulario" novalidate>
-            <label for="jwt">Token de usuario</label>
-            <div class="fila-token">
-              <input id="jwt" type="password" placeholder="Pegar JWT de Postman" autocapitalize="none" autocomplete="off" spellcheck="false" />
-              <button id="alternarToken" type="button" class="boton-secundario" aria-label="Mostrar token" aria-pressed="false">Mostrar</button>
-            </div>
+          <form id="formulario" method="post">
+            <label for="usuario">Usuario</label>
+            <input id="usuario" autocomplete="username" autocapitalize="none" spellcheck="false" required />
+            <label for="clave">Contraseña</label>
+            <input id="clave" type="password" autocomplete="current-password" required />
             <div class="acciones">
-              <button id="consultar" class="boton-primario" type="submit">Consultar vehículos</button>
-              <button id="borrar" class="boton-discreto" type="button">Borrar token</button>
+              <button id="ingresar" class="boton-primario" type="submit">Iniciar sesión</button>
             </div>
           </form>
-          <div id="mensaje" class="mensaje neutro" role="status" aria-live="polite">Listo para consultar.</div>
-          <p class="seguridad">El token permanece en memoria; no se almacena en el dispositivo.</p>
+          <div id="sesion-activa" hidden>
+            <div class="acciones">
+              <button id="consultar" class="boton-primario" type="button">Consultar vehículos</button>
+              <button id="cerrar-sesion" class="boton-discreto" type="button">Cerrar sesión</button>
+            </div>
+          </div>
+          <div id="mensaje" class="mensaje neutro" role="status" aria-live="polite">Inicie sesión para consultar vehículos.</div>
         </section>
 
         <section class="panel listado" aria-labelledby="titulo-vehiculos">
