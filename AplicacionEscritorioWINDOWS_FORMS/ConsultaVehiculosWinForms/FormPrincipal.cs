@@ -1,12 +1,14 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace ConsultaVehiculosWinForms;
 
 public partial class FormPrincipal : Form
 {
     private readonly VehiculosApiClient apiVehiculos = new();
+    private readonly CompradoresApiClient apiCompradores = new();
 
     public FormPrincipal()
     {
@@ -149,6 +151,57 @@ public partial class FormPrincipal : Form
         }
     }
 
+    private async void btnRegistrarComprador_Click(object? sender, EventArgs e)
+    {
+        string token = ObtenerToken();
+        if (token.Length == 0)
+            return;
+
+        string documento = txtDocumentoComprador.Text.Trim();
+        string nombre = txtNombreComprador.Text.Trim();
+        string correo = txtCorreoComprador.Text.Trim();
+        if (documento.Length < 3 || nombre.Length < 2
+            || correo.Length < 5 || !Regex.IsMatch(correo, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
+        {
+            MostrarEstado("Ingresa un documento de al menos 3 caracteres, un nombre y un correo válido.", esError: true);
+            return;
+        }
+
+        HabilitarAcciones(false);
+        MostrarEstado("Registrando comprador...");
+        try
+        {
+            var datos = new CrearCompradorRequest(documento, nombre, correo);
+            int id = await apiCompradores.CrearAsync(token, datos);
+            txtDocumentoComprador.Clear();
+            txtNombreComprador.Clear();
+            txtCorreoComprador.Clear();
+            MostrarEstado($"HTTP 201: comprador registrado con ID {id}.");
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode codigo)
+        {
+            string mensaje = codigo switch
+            {
+                HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity => "Revisa el documento, el nombre y el correo.",
+                HttpStatusCode.Unauthorized => "JWT inválido o vencido. Genere un token nuevo.",
+                HttpStatusCode.Forbidden => "Se requiere el rol OPERADOR o ADMIN para registrar compradores.",
+                HttpStatusCode.Conflict => "El documento ya está registrado para este usuario.",
+                HttpStatusCode.Created => "La API confirmó el alta, pero el ID no está disponible.",
+                _ => "Respuesta inesperada. Verifica el resultado antes de reintentar."
+            };
+            MostrarEstado($"HTTP {(int)codigo}: {mensaje}", esError: true);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            string mensaje = ex is TaskCanceledException ? "Se agotó el tiempo de espera." : "Se interrumpió la conexión con NGINX.";
+            MostrarEstado($"{mensaje} Verifica el resultado antes de reintentar.", esError: true);
+        }
+        finally
+        {
+            HabilitarAcciones(true);
+        }
+    }
+
     private async Task<int> CargarCatalogoAsync(string token)
     {
         List<Vehiculo> lista = await apiVehiculos.ConsultarAsync(token);
@@ -162,6 +215,7 @@ public partial class FormPrincipal : Form
     {
         btnConsultar.Enabled = habilitadas;
         btnRegistrar.Enabled = habilitadas;
+        btnRegistrarComprador.Enabled = habilitadas;
     }
 
     private void LimpiarDatos()

@@ -10,18 +10,12 @@ internal sealed record CrearVehiculoRequest(
 
 internal sealed class VehiculosApiClient(HttpClient clienteHttp)
 {
-    private static readonly HttpClient ClienteCompartido = new()
-    {
-        BaseAddress = new Uri("http://127.0.0.1:8090/"),
-        Timeout = TimeSpan.FromSeconds(15)
-    };
-
     private static readonly JsonSerializerOptions OpcionesJson = new()
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public VehiculosApiClient() : this(ClienteCompartido)
+    public VehiculosApiClient() : this(GatewayHttp.Cliente)
     {
     }
 

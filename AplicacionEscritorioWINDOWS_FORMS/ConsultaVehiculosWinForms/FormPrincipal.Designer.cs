@@ -19,6 +19,10 @@ partial class FormPrincipal
     private TextBox txtColor = null!;
     private TextBox txtPrecio = null!;
     private Button btnRegistrar = null!;
+    private TextBox txtDocumentoComprador = null!;
+    private TextBox txtNombreComprador = null!;
+    private TextBox txtCorreoComprador = null!;
+    private Button btnRegistrarComprador = null!;
 
     protected override void Dispose(bool disposing)
     {
@@ -41,6 +45,7 @@ partial class FormPrincipal
         lblTotal = new Label();
         dgvVehiculos = new DataGridView();
         GroupBox registro = CrearControlesRegistro();
+        GroupBox compradores = CrearControlesCompradores();
         ((System.ComponentModel.ISupportInitialize)dgvVehiculos).BeginInit();
         SuspendLayout();
         // 
@@ -129,7 +134,7 @@ partial class FormPrincipal
         dgvVehiculos.BackgroundColor = Color.White;
         dgvVehiculos.ColumnHeadersHeight = 38;
         dgvVehiculos.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-        dgvVehiculos.Location = new Point(30, 424);
+        dgvVehiculos.Location = new Point(30, 520);
         dgvVehiculos.MultiSelect = false;
         dgvVehiculos.Name = "dgvVehiculos";
         dgvVehiculos.ReadOnly = true;
@@ -137,8 +142,8 @@ partial class FormPrincipal
         dgvVehiculos.RowHeadersWidth = 51;
         dgvVehiculos.RowTemplate.Height = 30;
         dgvVehiculos.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        dgvVehiculos.Size = new Size(975, 350);
-        dgvVehiculos.TabIndex = 3;
+        dgvVehiculos.Size = new Size(975, 254);
+        dgvVehiculos.TabIndex = 4;
         // 
         // FormPrincipal
         // 
@@ -153,6 +158,7 @@ partial class FormPrincipal
         Controls.Add(btnConsultar);
         Controls.Add(lblEstado);
         Controls.Add(registro);
+        Controls.Add(compradores);
         Controls.Add(dgvVehiculos);
         Controls.Add(lblTotal);
         Font = new Font("Segoe UI", 10F);
@@ -206,6 +212,45 @@ partial class FormPrincipal
             campos.Controls.Add(new Label { Text = texto, AutoSize = true, TabIndex = orden }, columna, fila);
             var entrada = new TextBox { AccessibleName = texto, Dock = DockStyle.Fill, TabIndex = orden + 1 };
             campos.Controls.Add(entrada, columna, fila + 1);
+            return entrada;
+        }
+    }
+
+    private GroupBox CrearControlesCompradores()
+    {
+        var grupo = new GroupBox
+        {
+            Text = "Registrar comprador",
+            Location = new Point(30, 418),
+            Size = new Size(975, 90),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            TabIndex = 3,
+            Padding = new Padding(10, 6, 10, 8)
+        };
+        var campos = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 2 };
+        foreach (float ancho in new[] { 20f, 25f, 35f, 20f })
+            campos.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, ancho));
+        campos.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        campos.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        txtDocumentoComprador = AgregarCampo("Documento", 0);
+        txtNombreComprador = AgregarCampo("Nombre", 1);
+        txtCorreoComprador = AgregarCampo("Correo", 2);
+        btnRegistrarComprador = new Button
+        {
+            Text = "Registrar comprador", AutoSize = true, Dock = DockStyle.Fill,
+            TabIndex = 6, UseVisualStyleBackColor = true
+        };
+        btnRegistrarComprador.Click += btnRegistrarComprador_Click;
+        campos.Controls.Add(btnRegistrarComprador, 3, 1);
+        grupo.Controls.Add(campos);
+        return grupo;
+
+        TextBox AgregarCampo(string texto, int columna)
+        {
+            campos.Controls.Add(new Label { Text = texto, AutoSize = true, TabIndex = columna * 2 }, columna, 0);
+            var entrada = new TextBox { AccessibleName = texto, Dock = DockStyle.Fill, TabIndex = columna * 2 + 1 };
+            campos.Controls.Add(entrada, columna, 1);
             return entrada;
         }
     }
