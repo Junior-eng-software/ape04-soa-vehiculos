@@ -52,19 +52,48 @@ function sumar(mapa, clave) {
   mapa.set(clave, (mapa.get(clave) ?? 0) + 1);
 }
 
-export function calcularIndicadores(ventas, vehiculos = null) {
+function resumirInventario(catalogo) {
+  if (catalogo === null) return null;
+  const porMarca = new Map();
+  let disponibles = 0;
+  for (const { marca, estado } of catalogo.values()) {
+    if (estado === 'DISPONIBLE') disponibles++;
+    if (typeof marca !== 'string' || !marca.trim() || (estado !== 'DISPONIBLE' && estado !== 'VENDIDO')) continue;
+    const cantidades = porMarca.get(marca) ?? { marca, disponibles: 0, vendidos: 0 };
+    if (estado === 'DISPONIBLE') cantidades.disponibles++;
+    else cantidades.vendidos++;
+    porMarca.set(marca, cantidades);
+  }
+  return { total: catalogo.size, disponibles, porMarca: [...porMarca.values()] };
+}
+
+export function rangoDelPeriodo(dias, ahora = new Date()) {
+  const hasta = fechaLocal(ahora.toISOString());
+  const inicio = new Date(`${hasta}T00:00:00Z`);
+  inicio.setUTCDate(inicio.getUTCDate() - dias + 1);
+  return { desde: inicio.toISOString().slice(0, 10), hasta };
+}
+
+export function calcularIndicadores(ventas, vehiculos = null, { estado, desde, hasta } = {}) {
   const visibles = unicosPorId(ventas, 'id', camposVenta);
   const catalogo = vehiculos === null ? null : unicosPorId(vehiculos, 'idVehiculo', camposVehiculo);
   const porEstado = new Map();
   const registrosPorDia = new Map();
   const importes = new Map();
   const cruces = new Map();
+  const crucesCompletadas = new Map();
   let completadas = 0;
   let completadasSinImporte = 0;
   let registrosSinFecha = 0;
   let ventasSinCruce = 0;
+  let ventasVisibles = 0;
+  let completadasCruzadas = 0;
 
   for (const venta of visibles.values()) {
+    if (estado && venta.estado !== estado) continue;
+    const dia = fechaLocal(venta.fechaUTC);
+    if ((desde || hasta) && (!dia || (desde && dia < desde) || (hasta && dia > hasta))) continue;
+    ventasVisibles++;
     if (typeof venta.estado === 'string' && venta.estado.trim()) sumar(porEstado, venta.estado);
     if (venta.estado === 'COMPLETADA') {
       completadas++;
@@ -75,7 +104,6 @@ export function calcularIndicadores(ventas, vehiculos = null) {
         completadasSinImporte++;
       }
     }
-    const dia = fechaLocal(venta.fechaUTC);
     if (dia) sumar(registrosPorDia, dia);
     else registrosSinFecha++;
 
@@ -83,23 +111,35 @@ export function calcularIndicadores(ventas, vehiculos = null) {
       const vehiculo = catalogo.get(venta.vehiculoId);
       if (typeof vehiculo?.marca === 'string' && vehiculo.marca.trim()
           && typeof vehiculo.modelo === 'string' && vehiculo.modelo.trim()) {
-        sumar(cruces, JSON.stringify([vehiculo.marca, vehiculo.modelo]));
+        const clave = JSON.stringify([vehiculo.marca, vehiculo.modelo]);
+        sumar(cruces, clave);
+        if (venta.estado === 'COMPLETADA') {
+          sumar(crucesCompletadas, clave);
+          completadasCruzadas++;
+        }
       } else {
         ventasSinCruce++;
       }
     }
   }
 
+  const inventario = resumirInventario(catalogo);
+  const ranking = [...crucesCompletadas].sort(([, a], [, b]) => b - a);
+  const lider = ranking[0];
+  // Para afirmar un líder, todas las completadas deben cruzarse y no debe haber empate.
+  const modeloLider = lider && completadasCruzadas === completadas && lider[1] !== ranking[1]?.[1]
+    ? { vehiculo: JSON.parse(lider[0]), cantidad: lider[1] } : null;
   return {
-    ventasVisibles: visibles.size,
+    ventasVisibles,
     porEstado: Object.fromEntries(porEstado),
     completadas,
     importesPorMoneda: Object.fromEntries([...importes].map(([moneda, unidades]) => [moneda, importeDecimal(unidades)])),
     completadasSinImporte,
     registrosPorDia: Object.fromEntries([...registrosPorDia].sort(([a], [b]) => a.localeCompare(b))),
     registrosSinFecha,
-    vehiculosDisponibles: catalogo === null ? null
-      : [...catalogo.values()].filter((vehiculo) => vehiculo.estado === 'DISPONIBLE').length,
+    vehiculosDisponibles: inventario?.disponibles ?? null,
+    inventario,
+    modeloLider,
     ventasPorMarcaModelo: catalogo === null ? null : [...cruces].map(([clave, cantidad]) => {
       const [marca, modelo] = JSON.parse(clave);
       return { marca, modelo, cantidad };

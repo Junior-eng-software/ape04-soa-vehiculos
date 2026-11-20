@@ -6,7 +6,7 @@
  *
  * La ruta relativa pasa por el proxy de Vite (/api) hacia NGINX.
  */
-export async function listarVehiculos(token) {
+export async function listarVehiculos(token, signal) {
   // Headers es el objeto estándar del navegador para cabeceras HTTP.
   const headers = new Headers({ Accept: 'application/json' });
 
@@ -22,9 +22,11 @@ export async function listarVehiculos(token) {
     respuesta = await fetch('/api/vehiculos', {
       method: 'GET',
       headers,
+      signal,
       cache: 'no-store', // Evita mostrar un catálogo almacenado en caché.
     });
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     // Un fallo de red impide recibir una respuesta HTTP.
     throw new Error('No se pudo conectar. Verifique el servidor y la red.');
   }

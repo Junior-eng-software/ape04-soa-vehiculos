@@ -1,65 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
-import { listarVentas } from './api/ventasApi.js';
-import { calcularIndicadores } from './indicadoresVentas.js';
-
-export default function Ventas({ token, vehiculos }) {
-  const solicitud = useRef(null);
-  const [resultado, setResultado] = useState({ estado: 'inicial', ventas: [] });
-
-  useEffect(() => () => solicitud.current?.abort(), []);
-
-  async function consultar() {
-    solicitud.current?.abort();
-    const controlador = new AbortController();
-    solicitud.current = controlador;
-    setResultado({ estado: 'cargando', ventas: [] });
-
-    try {
-      const ventas = await listarVentas(token, controlador.signal);
-      if (!controlador.signal.aborted) setResultado({ estado: 'listo', ventas });
-    } catch (error) {
-      if (!controlador.signal.aborted) {
-        setResultado({ estado: 'error', ventas: [], mensaje: error.message });
-      }
-    }
-  }
-
-  const { estado, ventas, mensaje } = resultado;
-  const indicadores = estado === 'listo' ? calcularIndicadores(ventas, vehiculos) : null;
+export default function Ventas({ resultado }) {
+  const { estado, datos: ventas = [], mensaje } = resultado;
   const avisos = {
-    inicial: 'Presione Consultar ventas para cargar el listado.',
-    cargando: 'Consultando ventas...',
+    inicial: 'Pega el JWT y consulta el listado de ventas.',
+    cargando: 'Consultando ventas…',
     listo: ventas.length === 0 ? 'No hay ventas visibles.' : `${ventas.length} ventas visibles.`,
     error: mensaje,
   };
 
   return (
     <section className="panel" aria-labelledby="titulo-ventas">
-      <h2 id="titulo-ventas">4. Ventas</h2>
-      <div className="acciones">
-        <button type="button" onClick={consultar} disabled={estado === 'cargando'}>
-          Consultar ventas
-        </button>
-      </div>
-      <div className={estado === 'error' ? 'estado estado-error' : 'estado estado-ok'} role="status">
-        <span>{avisos[estado]}</span>
-      </div>
-      {indicadores && (
-        <dl className="detalle">
-          <div><dt>Ventas completadas</dt><dd>{indicadores.completadas}</dd></div>
-          {Object.entries(indicadores.importesPorMoneda).map(([moneda, importe]) => (
-            <div key={moneda}><dt>Importe completado ({moneda})</dt><dd>{importe}</dd></div>
-          ))}
-          {indicadores.completadasSinImporte > 0 && (
-            <div><dt>Completadas sin importe o moneda válidos</dt><dd>{indicadores.completadasSinImporte}</dd></div>
-          )}
-          {indicadores.vehiculosDisponibles !== null && (
-            <div><dt>Vehículos disponibles</dt><dd>{indicadores.vehiculosDisponibles}</dd></div>
-          )}
-        </dl>
-      )}
+      <h2 id="titulo-ventas">Ventas</h2>
+      <p className={`aviso${estado === 'error' ? ' aviso-error' : ''}`} role="status">{avisos[estado]}</p>
       {ventas.length > 0 && (
-        <div className="tabla-scroll">
+        <div className="tabla-scroll" role="region" aria-label="Tabla de ventas" tabIndex={0}>
           <table>
             <thead>
               <tr>
