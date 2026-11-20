@@ -13,6 +13,7 @@ public partial class FormPrincipal : Form
     public FormPrincipal()
     {
         InitializeComponent();
+        txtToken.TextChanged += (_, _) => dgvCompradores.DataSource = null;
     }
 
     private string ObtenerToken()
@@ -37,6 +38,7 @@ public partial class FormPrincipal : Form
         if (token.Length == 0)
             return;
 
+        pestanasCatalogo.SelectedIndex = 0;
         HabilitarAcciones(false);
         MostrarEstado("Consultando API Java...");
 
@@ -202,12 +204,58 @@ public partial class FormPrincipal : Form
         }
     }
 
+    private async void btnConsultarCompradores_Click(object? sender, EventArgs e)
+    {
+        string token = ObtenerToken();
+        if (token.Length == 0)
+            return;
+
+        dgvCompradores.DataSource = null;
+        HabilitarAcciones(false);
+        txtToken.Enabled = false;
+        MostrarEstado("Consultando compradores...");
+        try
+        {
+            List<CompradorResumen> compradores = await apiCompradores.ConsultarAsync(token);
+            dgvCompradores.DataSource = compradores;
+            MostrarEstado(compradores.Count == 0
+                ? "HTTP 200: no hay compradores visibles."
+                : $"HTTP 200: {compradores.Count} compradores visibles.");
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode codigo)
+        {
+            string mensaje = codigo switch
+            {
+                HttpStatusCode.Unauthorized => "JWT inválido o vencido. Genere un token nuevo.",
+                HttpStatusCode.Forbidden => "El usuario no tiene permiso para consultar compradores.",
+                _ => "Respuesta inesperada al consultar compradores."
+            };
+            MostrarEstado($"HTTP {(int)codigo}: {mensaje}", esError: true);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            string mensaje = ex switch
+            {
+                TaskCanceledException => "La API no respondió dentro de los 15 segundos.",
+                JsonException => "La respuesta no tiene el JSON esperado de compradores.",
+                _ => "No se pudo conectar. Compruebe NGINX en localhost:8090."
+            };
+            MostrarEstado(mensaje, esError: true);
+        }
+        finally
+        {
+            txtToken.Enabled = true;
+            HabilitarAcciones(true);
+        }
+    }
+
     private async Task<int> CargarCatalogoAsync(string token)
     {
         List<Vehiculo> lista = await apiVehiculos.ConsultarAsync(token);
         dgvVehiculos.DataSource = null;
         dgvVehiculos.DataSource = lista;
         lblTotal.Text = $"Total de vehículos: {lista.Count}";
+        pestanasCatalogo.SelectedIndex = 0;
         return lista.Count;
     }
 
@@ -216,6 +264,7 @@ public partial class FormPrincipal : Form
         btnConsultar.Enabled = habilitadas;
         btnRegistrar.Enabled = habilitadas;
         btnRegistrarComprador.Enabled = habilitadas;
+        btnConsultarCompradores.Enabled = habilitadas;
     }
 
     private void LimpiarDatos()

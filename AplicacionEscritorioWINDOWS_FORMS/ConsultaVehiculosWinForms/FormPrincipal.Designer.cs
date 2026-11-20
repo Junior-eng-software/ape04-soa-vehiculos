@@ -23,6 +23,9 @@ partial class FormPrincipal
     private TextBox txtNombreComprador = null!;
     private TextBox txtCorreoComprador = null!;
     private Button btnRegistrarComprador = null!;
+    private TabControl pestanasCatalogo = null!;
+    private Button btnConsultarCompradores = null!;
+    private DataGridView dgvCompradores = null!;
 
     protected override void Dispose(bool disposing)
     {
@@ -129,12 +132,11 @@ partial class FormPrincipal
         dgvVehiculos.AllowUserToDeleteRows = false;
         dataGridViewCellStyle1.BackColor = Color.FromArgb(245, 247, 250);
         dgvVehiculos.AlternatingRowsDefaultCellStyle = dataGridViewCellStyle1;
-        dgvVehiculos.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+        dgvVehiculos.Dock = DockStyle.Fill;
         dgvVehiculos.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
         dgvVehiculos.BackgroundColor = Color.White;
         dgvVehiculos.ColumnHeadersHeight = 38;
         dgvVehiculos.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-        dgvVehiculos.Location = new Point(30, 520);
         dgvVehiculos.MultiSelect = false;
         dgvVehiculos.Name = "dgvVehiculos";
         dgvVehiculos.ReadOnly = true;
@@ -142,8 +144,8 @@ partial class FormPrincipal
         dgvVehiculos.RowHeadersWidth = 51;
         dgvVehiculos.RowTemplate.Height = 30;
         dgvVehiculos.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        dgvVehiculos.Size = new Size(975, 254);
-        dgvVehiculos.TabIndex = 4;
+        dgvVehiculos.TabIndex = 0;
+        pestanasCatalogo = CrearPestanasCatalogo();
         // 
         // FormPrincipal
         // 
@@ -159,7 +161,7 @@ partial class FormPrincipal
         Controls.Add(lblEstado);
         Controls.Add(registro);
         Controls.Add(compradores);
-        Controls.Add(dgvVehiculos);
+        Controls.Add(pestanasCatalogo);
         Controls.Add(lblTotal);
         Font = new Font("Segoe UI", 10F);
         MinimumSize = new Size(940, 700);
@@ -253,6 +255,43 @@ partial class FormPrincipal
             campos.Controls.Add(entrada, columna, 1);
             return entrada;
         }
+    }
+
+    private TabControl CrearPestanasCatalogo()
+    {
+        var pestanas = new TabControl
+        {
+            Location = new Point(30, 520),
+            Size = new Size(975, 254),
+            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+            TabIndex = 4
+        };
+        var vehiculos = new TabPage("Vehículos");
+        vehiculos.Controls.Add(dgvVehiculos);
+
+        var compradores = new TabPage("Compradores") { Padding = new Padding(6) };
+        btnConsultarCompradores = new Button
+        {
+            Text = "Consultar compradores", Dock = DockStyle.Top, Height = 36,
+            TabIndex = 0, UseVisualStyleBackColor = true
+        };
+        btnConsultarCompradores.Click += btnConsultarCompradores_Click;
+        dgvCompradores = new DataGridView
+        {
+            Dock = DockStyle.Fill, ReadOnly = true, AutoGenerateColumns = false,
+            AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, BackgroundColor = Color.White,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect, TabIndex = 1
+        };
+        dgvCompradores.Columns.Add(Columna("ID", nameof(CompradorResumen.Id), 20));
+        dgvCompradores.Columns.Add(Columna("Nombre", nameof(CompradorResumen.Nombre), 80));
+        compradores.Controls.Add(dgvCompradores);
+        compradores.Controls.Add(btnConsultarCompradores);
+
+        pestanas.TabPages.Add(vehiculos);
+        pestanas.TabPages.Add(compradores);
+        pestanas.SelectedIndexChanged += (_, _) => lblTotal.Visible = pestanas.SelectedIndex == 0;
+        return pestanas;
     }
 
     private static DataGridViewTextBoxColumn Columna(

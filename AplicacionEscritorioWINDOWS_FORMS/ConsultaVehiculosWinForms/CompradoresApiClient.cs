@@ -6,16 +6,36 @@ using System.Text.Json;
 namespace ConsultaVehiculosWinForms;
 
 internal sealed record CrearCompradorRequest(string Documento, string Nombre, string Correo);
+internal sealed record CompradorResumen(int Id, string Nombre);
 
 internal sealed class CompradoresApiClient(HttpClient clienteHttp)
 {
+    private const string RutaCompradores = "api/compradores";
+
     public CompradoresApiClient() : this(GatewayHttp.Cliente)
     {
     }
 
+    public async Task<List<CompradorResumen>> ConsultarAsync(string token)
+    {
+        using var solicitud = new HttpRequestMessage(HttpMethod.Get, RutaCompradores);
+        solicitud.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using HttpResponseMessage respuesta = await clienteHttp.SendAsync(solicitud).ConfigureAwait(false);
+        respuesta.EnsureSuccessStatusCode();
+        if (respuesta.StatusCode != HttpStatusCode.OK)
+            throw new HttpRequestException("HTTP inesperado al consultar compradores.", null, respuesta.StatusCode);
+
+        var compradores = await respuesta.Content.ReadFromJsonAsync<List<CompradorResumen>>().ConfigureAwait(false);
+        if (compradores is null || compradores.Any(c => c is null || c.Id <= 0 || c.Nombre is null))
+            throw new JsonException("La respuesta no contiene una lista de compradores válida.");
+
+        return compradores;
+    }
+
     public async Task<int> CrearAsync(string token, CrearCompradorRequest datos)
     {
-        using var solicitud = new HttpRequestMessage(HttpMethod.Post, "api/compradores");
+        using var solicitud = new HttpRequestMessage(HttpMethod.Post, RutaCompradores);
         solicitud.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         solicitud.Content = JsonContent.Create(datos);
 
