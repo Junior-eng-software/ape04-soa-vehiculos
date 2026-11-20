@@ -1,20 +1,11 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Text.Json;
 
 namespace ConsultaVehiculosWinForms;
 
 public partial class FormPrincipal : Form
 {
-    // El endpoint real está definido en VehiculoController.java.
-    private const string UrlJava = "http://127.0.0.1:8080/";
-
-    // Se reutiliza un solo cliente HTTP durante toda la aplicación.
-    private static readonly HttpClient ClienteHttp = new()
-    {
-        BaseAddress = new Uri(UrlJava),
-        Timeout = TimeSpan.FromSeconds(15)
-    };
+    private readonly VehiculosApiClient apiVehiculos = new();
 
     public FormPrincipal()
     {
@@ -44,39 +35,7 @@ public partial class FormPrincipal : Form
 
         try
         {
-            // GET /api/vehiculos. El token se envía como Authorization: Bearer.
-            using var solicitud = new HttpRequestMessage(HttpMethod.Get, "api/vehiculos");
-            solicitud.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-            using HttpResponseMessage respuesta = await ClienteHttp.SendAsync(solicitud);
-
-            if (respuesta.StatusCode == HttpStatusCode.Unauthorized)
-            {
-                LimpiarDatos();
-                MostrarEstado("HTTP 401: JWT inválido o vencido. Genere un token nuevo.", esError: true);
-                return;
-            }
-
-            if (respuesta.StatusCode == HttpStatusCode.Forbidden)
-            {
-                LimpiarDatos();
-                MostrarEstado("HTTP 403: el usuario no tiene permiso de consulta.", esError: true);
-                return;
-            }
-
-            if (!respuesta.IsSuccessStatusCode)
-            {
-                LimpiarDatos();
-                MostrarEstado($"Error HTTP {(int)respuesta.StatusCode} al consultar Java.", esError: true);
-                return;
-            }
-
-            // VehiculoController devuelve un arreglo JSON, no un objeto con 'data'.
-            string contenidoJson = await respuesta.Content.ReadAsStringAsync();
-            List<Vehiculo> lista = JsonSerializer.Deserialize<List<Vehiculo>>(
-                contenidoJson,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                ?? new List<Vehiculo>();
+            List<Vehiculo> lista = await apiVehiculos.ConsultarAsync(token);
 
             dgvVehiculos.DataSource = null;
             dgvVehiculos.DataSource = lista;
@@ -85,10 +44,20 @@ public partial class FormPrincipal : Form
                 ? "HTTP 200: la API respondió, pero no hay vehículos registrados."
                 : "HTTP 200: consulta realizada correctamente.");
         }
+        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode codigo)
+        {
+            LimpiarDatos();
+            MostrarEstado(codigo switch
+            {
+                HttpStatusCode.Unauthorized => "HTTP 401: JWT inválido o vencido. Genere un token nuevo.",
+                HttpStatusCode.Forbidden => "HTTP 403: el usuario no tiene permiso de consulta.",
+                _ => $"Error HTTP {(int)codigo} al consultar Java."
+            }, esError: true);
+        }
         catch (HttpRequestException)
         {
             LimpiarDatos();
-            MostrarEstado("No se pudo conectar. Compruebe Spring Boot en localhost:8080.", esError: true);
+            MostrarEstado("No se pudo conectar. Compruebe NGINX en localhost:8090.", esError: true);
         }
         catch (TaskCanceledException)
         {
