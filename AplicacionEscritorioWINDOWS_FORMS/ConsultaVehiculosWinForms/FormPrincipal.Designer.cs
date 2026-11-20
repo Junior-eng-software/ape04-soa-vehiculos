@@ -26,6 +26,8 @@ partial class FormPrincipal
     private TabControl pestanasCatalogo = null!;
     private Button btnConsultarCompradores = null!;
     private DataGridView dgvCompradores = null!;
+    private Button btnConsultarVentas = null!;
+    private DataGridView dgvVentas = null!;
 
     protected override void Dispose(bool disposing)
     {
@@ -269,29 +271,49 @@ partial class FormPrincipal
         var vehiculos = new TabPage("Vehículos");
         vehiculos.Controls.Add(dgvVehiculos);
 
-        var compradores = new TabPage("Compradores") { Padding = new Padding(6) };
-        btnConsultarCompradores = new Button
+        var compradores = CrearPestanaConsulta("Compradores", "Consultar compradores",
+            btnConsultarCompradores_Click, out btnConsultarCompradores, out dgvCompradores);
+        dgvCompradores.Columns.Add(Columna("ID", nameof(CompradorResumen.Id), 20));
+        dgvCompradores.Columns.Add(Columna("Nombre", nameof(CompradorResumen.Nombre), 80));
+
+        var ventas = CrearPestanaConsulta("Ventas", "Consultar ventas",
+            btnConsultarVentas_Click, out btnConsultarVentas, out dgvVentas);
+        dgvVentas.Columns.AddRange(
+            Columna("ID", nameof(VentaResumen.Id), 8),
+            Columna("Vehículo ID", nameof(VentaResumen.VehiculoId), 12),
+            Columna("Comprador ID", nameof(VentaResumen.CompradorId), 13),
+            Columna("Estado", nameof(VentaResumen.Estado), 15),
+            Columna("Precio acordado", nameof(VentaResumen.PrecioAcordado), 15),
+            Columna("Moneda", nameof(VentaResumen.Moneda), 9),
+            Columna("Fecha UTC", nameof(VentaResumen.FechaUtc), 28));
+
+        pestanas.TabPages.Add(vehiculos);
+        pestanas.TabPages.Add(compradores);
+        pestanas.TabPages.Add(ventas);
+        pestanas.SelectedIndexChanged += (_, _) => lblTotal.Visible = pestanas.SelectedIndex == 0;
+        return pestanas;
+    }
+
+    private static TabPage CrearPestanaConsulta(string titulo, string accion,
+        EventHandler consultar, out Button boton, out DataGridView grilla)
+    {
+        var pestana = new TabPage(titulo) { Padding = new Padding(6) };
+        boton = new Button
         {
-            Text = "Consultar compradores", Dock = DockStyle.Top, Height = 36,
+            Text = accion, Dock = DockStyle.Top, Height = 36,
             TabIndex = 0, UseVisualStyleBackColor = true
         };
-        btnConsultarCompradores.Click += btnConsultarCompradores_Click;
-        dgvCompradores = new DataGridView
+        boton.Click += consultar;
+        grilla = new DataGridView
         {
             Dock = DockStyle.Fill, ReadOnly = true, AutoGenerateColumns = false,
             AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false,
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, BackgroundColor = Color.White,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect, TabIndex = 1
         };
-        dgvCompradores.Columns.Add(Columna("ID", nameof(CompradorResumen.Id), 20));
-        dgvCompradores.Columns.Add(Columna("Nombre", nameof(CompradorResumen.Nombre), 80));
-        compradores.Controls.Add(dgvCompradores);
-        compradores.Controls.Add(btnConsultarCompradores);
-
-        pestanas.TabPages.Add(vehiculos);
-        pestanas.TabPages.Add(compradores);
-        pestanas.SelectedIndexChanged += (_, _) => lblTotal.Visible = pestanas.SelectedIndex == 0;
-        return pestanas;
+        pestana.Controls.Add(grilla);
+        pestana.Controls.Add(boton);
+        return pestana;
     }
 
     private static DataGridViewTextBoxColumn Columna(

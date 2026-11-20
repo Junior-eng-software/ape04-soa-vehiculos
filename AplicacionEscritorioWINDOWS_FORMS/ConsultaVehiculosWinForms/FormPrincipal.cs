@@ -9,11 +9,16 @@ public partial class FormPrincipal : Form
 {
     private readonly VehiculosApiClient apiVehiculos = new();
     private readonly CompradoresApiClient apiCompradores = new();
+    private readonly VentasApiClient apiVentas = new();
 
     public FormPrincipal()
     {
         InitializeComponent();
-        txtToken.TextChanged += (_, _) => dgvCompradores.DataSource = null;
+        txtToken.TextChanged += (_, _) =>
+        {
+            dgvCompradores.DataSource = null;
+            dgvVentas.DataSource = null;
+        };
     }
 
     private string ObtenerToken()
@@ -204,31 +209,38 @@ public partial class FormPrincipal : Form
         }
     }
 
-    private async void btnConsultarCompradores_Click(object? sender, EventArgs e)
+    private async void btnConsultarCompradores_Click(object? sender, EventArgs e) =>
+        await ConsultarListadoAsync(apiCompradores.ConsultarAsync, dgvCompradores, "compradores");
+
+    private async void btnConsultarVentas_Click(object? sender, EventArgs e) =>
+        await ConsultarListadoAsync(apiVentas.ConsultarAsync, dgvVentas, "ventas");
+
+    private async Task ConsultarListadoAsync<T>(
+        Func<string, Task<List<T>>> consultar, DataGridView grilla, string recurso)
     {
         string token = ObtenerToken();
         if (token.Length == 0)
             return;
 
-        dgvCompradores.DataSource = null;
+        grilla.DataSource = null;
         HabilitarAcciones(false);
         txtToken.Enabled = false;
-        MostrarEstado("Consultando compradores...");
+        MostrarEstado($"Consultando {recurso}...");
         try
         {
-            List<CompradorResumen> compradores = await apiCompradores.ConsultarAsync(token);
-            dgvCompradores.DataSource = compradores;
-            MostrarEstado(compradores.Count == 0
-                ? "HTTP 200: no hay compradores visibles."
-                : $"HTTP 200: {compradores.Count} compradores visibles.");
+            List<T> registros = await consultar(token);
+            grilla.DataSource = registros;
+            MostrarEstado(registros.Count == 0
+                ? $"HTTP 200: no hay {recurso} visibles."
+                : $"HTTP 200: {registros.Count} {recurso} visibles.");
         }
         catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode codigo)
         {
             string mensaje = codigo switch
             {
                 HttpStatusCode.Unauthorized => "JWT inválido o vencido. Genere un token nuevo.",
-                HttpStatusCode.Forbidden => "El usuario no tiene permiso para consultar compradores.",
-                _ => "Respuesta inesperada al consultar compradores."
+                HttpStatusCode.Forbidden => $"El usuario no tiene permiso para consultar {recurso}.",
+                _ => $"Respuesta inesperada al consultar {recurso}."
             };
             MostrarEstado($"HTTP {(int)codigo}: {mensaje}", esError: true);
         }
@@ -237,7 +249,7 @@ public partial class FormPrincipal : Form
             string mensaje = ex switch
             {
                 TaskCanceledException => "La API no respondió dentro de los 15 segundos.",
-                JsonException => "La respuesta no tiene el JSON esperado de compradores.",
+                JsonException => $"La respuesta no tiene el JSON esperado de {recurso}.",
                 _ => "No se pudo conectar. Compruebe NGINX en localhost:8090."
             };
             MostrarEstado(mensaje, esError: true);
@@ -265,6 +277,7 @@ public partial class FormPrincipal : Form
         btnRegistrar.Enabled = habilitadas;
         btnRegistrarComprador.Enabled = habilitadas;
         btnConsultarCompradores.Enabled = habilitadas;
+        btnConsultarVentas.Enabled = habilitadas;
     }
 
     private void LimpiarDatos()
