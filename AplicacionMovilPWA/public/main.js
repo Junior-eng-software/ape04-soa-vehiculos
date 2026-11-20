@@ -1,5 +1,6 @@
 import { iniciarSesion, listarVehiculos } from './api.js';
 import { crearSesion } from './sesion.js';
+import { crearRegistroVenta, listarCompradores } from './ventas.js';
 
 // Referencias a los controles de la interfaz móvil.
 const formulario = document.querySelector('#formulario');
@@ -13,9 +14,17 @@ const mensaje = document.querySelector('#mensaje');
 const contenedor = document.querySelector('#vehiculos');
 const contador = document.querySelector('#contador');
 const conexion = document.querySelector('#conexion');
+const panelVenta = document.querySelector('#panel-venta');
+const formularioVenta = document.querySelector('#formulario-venta');
+const selectorVehiculo = document.querySelector('#vehiculo-venta');
+const selectorComprador = document.querySelector('#comprador-venta');
+const botonCompradores = document.querySelector('#consultar-compradores');
+const botonVenta = document.querySelector('#registrar-venta');
+const mensajeVenta = document.querySelector('#mensaje-venta');
 
 const moneda = new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' });
 const sesion = crearSesion();
+const registro = crearRegistroVenta();
 let solicitud;
 let temporizador;
 
@@ -27,6 +36,26 @@ function mostrarMensaje(texto, tipo = 'neutro') {
 function limpiarListado() {
   contenedor.replaceChildren();
   contador.textContent = '0 vehículos';
+}
+
+function mostrarVenta(texto, tipo = 'neutro') {
+  mensajeVenta.textContent = texto;
+  mensajeVenta.className = 'mensaje ' + tipo;
+  mensajeVenta.hidden = !texto;
+}
+
+function cargarOpciones(selector, opciones, indicacion) {
+  selector.replaceChildren(new Option(indicacion, ''), ...opciones);
+}
+
+function actualizarAcciones() {
+  const ocupado = Boolean(solicitud);
+  const pendiente = registro.pendiente();
+  botonConsultar.disabled = ocupado;
+  botonCompradores.disabled = ocupado || pendiente;
+  selectorVehiculo.disabled = selectorComprador.disabled = ocupado || pendiente;
+  botonVenta.disabled = ocupado || !selectorVehiculo.value || !selectorComprador.value;
+  botonVenta.textContent = pendiente ? 'Reintentar misma venta' : 'Registrar venta';
 }
 
 function crearElemento(etiqueta, clase, contenido) {
@@ -91,17 +120,25 @@ function pintarListado(vehiculos) {
 }
 
 function cerrarSesion(texto, tipo = 'neutro') {
+  const ventaSinConfirmar = registro.pendiente();
   solicitud?.abort();
   solicitud = null;
   clearTimeout(temporizador);
   sesion.cerrar();
+  registro.limpiar();
   formulario.reset();
   formulario.hidden = false;
   panelSesion.hidden = true;
+  panelVenta.hidden = true;
   botonIngresar.disabled = false;
-  botonConsultar.disabled = false;
+  cargarOpciones(selectorVehiculo, [], 'Consulte los vehículos');
+  cargarOpciones(selectorComprador, [], 'Consulte los compradores');
+  mostrarVenta('');
+  actualizarAcciones();
   limpiarListado();
-  mostrarMensaje(texto, tipo);
+  mostrarMensaje(ventaSinConfirmar
+    ? texto + ' Había una venta sin confirmar. Verifique su estado antes de volver a registrarla.'
+    : texto, tipo);
 }
 
 function sesionVencida() {
@@ -130,6 +167,7 @@ formulario.addEventListener('submit', async (evento) => {
     formulario.reset();
     formulario.hidden = true;
     panelSesion.hidden = false;
+    panelVenta.hidden = false;
     botonConsultar.focus();
     temporizador = setTimeout(sesionVencida, segundos * 1000);
     mostrarMensaje('Sesión iniciada. Puede consultar los vehículos.', 'exito');
@@ -139,6 +177,7 @@ formulario.addEventListener('submit', async (evento) => {
     if (solicitud === actual) {
       solicitud = null;
       botonIngresar.disabled = false;
+      actualizarAcciones();
     }
   }
 });
@@ -146,12 +185,13 @@ formulario.addEventListener('submit', async (evento) => {
 botonConsultar.addEventListener('click', async () => {
   const jwt = sesion.leer();
   if (!jwt) return sesionVencida();
+  if (solicitud) return;
 
-  solicitud?.abort();
   const actual = new AbortController();
   solicitud = actual;
-  botonConsultar.disabled = true;
+  actualizarAcciones();
   limpiarListado();
+  if (!registro.pendiente()) cargarOpciones(selectorVehiculo, [], 'Consulte los vehículos');
   mostrarMensaje('Consultando vehículos…');
 
   try {
@@ -159,6 +199,12 @@ botonConsultar.addEventListener('click', async () => {
     if (actual.signal.aborted) return;
     if (!sesion.leer()) return sesionVencida();
     pintarListado(respuesta.vehiculos);
+    if (!registro.pendiente()) {
+      const opciones = respuesta.vehiculos.filter((v) => v.estado === 'DISPONIBLE'
+        && Number.isSafeInteger(v.idVehiculo) && v.idVehiculo > 0)
+        .map((v) => new Option([v.marca, v.modelo, '(ID ' + v.idVehiculo + ')'].join(' '), v.idVehiculo));
+      cargarOpciones(selectorVehiculo, opciones, opciones.length ? 'Seleccione un vehículo' : 'No hay vehículos disponibles');
+    }
     mostrarMensaje(`HTTP ${respuesta.codigoHttp}: ${respuesta.vehiculos.length} vehículo(s) consultado(s).`, 'exito');
   } catch (error) {
     if (actual.signal.aborted) return;
@@ -173,7 +219,80 @@ botonConsultar.addEventListener('click', async () => {
   } finally {
     if (solicitud === actual) {
       solicitud = null;
-      botonConsultar.disabled = false;
+      actualizarAcciones();
+    }
+  }
+});
+
+botonCompradores.addEventListener('click', async () => {
+  const jwt = sesion.leer();
+  if (!jwt) return sesionVencida();
+  if (solicitud || registro.pendiente()) return;
+
+  const actual = new AbortController();
+  solicitud = actual;
+  actualizarAcciones();
+  cargarOpciones(selectorComprador, [], 'Consulte los compradores');
+  mostrarVenta('Consultando compradores…');
+  try {
+    const compradores = await listarCompradores(jwt, actual.signal);
+    if (actual.signal.aborted) return;
+    if (!sesion.leer()) return sesionVencida();
+    const opciones = compradores.map((c) => new Option(c.nombre + ' (ID ' + c.id + ')', c.id));
+    cargarOpciones(selectorComprador, opciones, opciones.length ? 'Seleccione un comprador' : 'No hay compradores visibles');
+    mostrarVenta(compradores.length ? 'Seleccione un comprador autorizado.' : 'No hay compradores visibles.');
+  } catch (error) {
+    if (actual.signal.aborted) return;
+    if (error.codigoHttp === 401) return sesionVencida();
+    mostrarVenta(error.message, 'error');
+  } finally {
+    if (solicitud === actual) {
+      solicitud = null;
+      actualizarAcciones();
+    }
+  }
+});
+
+selectorVehiculo.addEventListener('change', actualizarAcciones);
+selectorComprador.addEventListener('change', actualizarAcciones);
+
+formularioVenta.addEventListener('submit', async (evento) => {
+  evento.preventDefault();
+  const jwt = sesion.leer();
+  if (!jwt) return sesionVencida();
+  if (solicitud || !selectorVehiculo.value || !selectorComprador.value) return;
+
+  const datos = { vehiculoId: Number(selectorVehiculo.value), compradorId: Number(selectorComprador.value) };
+  const actual = new AbortController();
+  solicitud = actual;
+  actualizarAcciones();
+  mostrarVenta('Enviando solicitud de venta…');
+  try {
+    const resultado = await registro.registrar(jwt, datos, actual.signal);
+    if (actual.signal.aborted || !resultado) return;
+    if (!sesion.leer()) return sesionVencida();
+    const { codigoHttp, venta } = resultado;
+    const importe = venta.precioAcordado === null ? ''
+      : ' Importe: ' + venta.precioAcordado + (venta.moneda ? ' ' + venta.moneda : '') + '.';
+    const confirmacion = 'HTTP ' + codigoHttp + ': venta ' + venta.id + ', estado ' + venta.estado + '.' + importe;
+    if (codigoHttp === 202) {
+      mostrarVenta(confirmacion + ' Puede reintentar la misma venta para confirmar su estado.');
+    } else {
+      selectorVehiculo.selectedOptions[0]?.remove();
+      selectorVehiculo.value = '';
+      selectorComprador.value = '';
+      mostrarVenta(confirmacion, 'exito');
+    }
+  } catch (error) {
+    if (actual.signal.aborted) return;
+    if (error.codigoHttp === 401) return sesionVencida();
+    mostrarVenta(error.incierto
+      ? error.message + ' Resultado sin confirmar. Reintente la misma venta.'
+      : error.message, 'error');
+  } finally {
+    if (solicitud === actual) {
+      solicitud = null;
+      actualizarAcciones();
     }
   }
 });

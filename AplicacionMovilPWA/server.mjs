@@ -6,6 +6,7 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)));
@@ -22,7 +23,7 @@ function responderJson(respuesta, estado, datos) {
   respuesta.end(JSON.stringify(datos));
 }
 
-function origenLoginPermitido(peticion) {
+function origenLocalPermitido(peticion) {
   try {
     const destino = new URL('http://' + peticion.headers.host);
     return ['localhost', '127.0.0.1', '[::1]'].includes(destino.hostname)
@@ -38,7 +39,7 @@ async function autenticar(peticion, respuesta, urlToken, clientePwa) {
     respuesta.setHeader('Allow', 'POST');
     return responderJson(respuesta, 405, { error: 'Método no permitido.' });
   }
-  if (!origenLoginPermitido(peticion)) {
+  if (!origenLocalPermitido(peticion)) {
     return responderJson(respuesta, 403, { error: 'Origen no autorizado.' });
   }
   if (peticion.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
@@ -131,33 +132,39 @@ export function crearServidor({
     }
 
     if (url.pathname.startsWith('/api/')) {
-      if (url.pathname !== '/api/vehiculos' || peticion.method !== 'GET') {
-        respuesta.writeHead(404, { 'Content-Type': 'application/json' });
-        respuesta.end(JSON.stringify({ error: 'Endpoint no disponible' }));
-        return;
+      const venta = url.pathname === '/api/ventas' && peticion.method === 'POST';
+      const listado = ['/api/vehiculos', '/api/compradores'].includes(url.pathname) && peticion.method === 'GET';
+      if (!venta && !listado) {
+        return responderJson(respuesta, 404, { error: 'Endpoint no disponible.' });
       }
-      const abortador = new AbortController();
-      const temporizador = setTimeout(() => abortador.abort(), 12000);
+      if (venta && !origenLocalPermitido(peticion)) {
+        return responderJson(respuesta, 403, { error: 'Origen no autorizado.' });
+      }
+      // NGINX admite hasta 30 s de lectura para FastAPI.
+      const signal = AbortSignal.timeout(venta ? 35000 : 12000);
       try {
-        const encabezados = { Accept: 'application/json' };
-        if (peticion.headers.authorization) {
-          encabezados.Authorization = peticion.headers.authorization;
+        const encabezados = new Headers({ Accept: 'application/json' });
+        if (peticion.headers.authorization) encabezados.set('Authorization', peticion.headers.authorization);
+        if (venta) {
+          if (peticion.headers['content-type']) encabezados.set('Content-Type', peticion.headers['content-type']);
+          if (peticion.headers['idempotency-key']) encabezados.set('Idempotency-Key', peticion.headers['idempotency-key']);
         }
-        const remoto = await fetch(destino + '/api/vehiculos', {
-          method: 'GET', headers: encabezados, signal: abortador.signal, cache: 'no-store',
+        const remoto = await fetch(destino + url.pathname, {
+          method: peticion.method, headers: encabezados, signal, cache: 'no-store', redirect: 'manual',
+          ...(venta && { body: Readable.toWeb(peticion), duplex: 'half' }),
         });
         const datos = Buffer.from(await remoto.arrayBuffer());
+        const ubicacion = venta ? remoto.headers.get('location') : null;
         respuesta.writeHead(remoto.status, {
           'Content-Type': remoto.headers.get('content-type') || 'application/json; charset=utf-8',
           'Cache-Control': 'no-store', 'Vary': 'Authorization',
+          ...(ubicacion && { Location: ubicacion }),
         });
         respuesta.end(datos);
-      } catch (error) {
-        const tiempoAgotado = error.name === 'AbortError';
-        respuesta.writeHead(tiempoAgotado ? 504 : 502, { 'Content-Type': 'application/json; charset=utf-8' });
-        respuesta.end(JSON.stringify({ error: tiempoAgotado ? 'Tiempo de espera agotado' : 'API Java no disponible' }));
-      } finally {
-        clearTimeout(temporizador);
+      } catch {
+        return responderJson(respuesta, signal.aborted ? 504 : 502, {
+          error: signal.aborted ? 'Tiempo de espera agotado.' : 'API no disponible.',
+        });
       }
       return;
     }

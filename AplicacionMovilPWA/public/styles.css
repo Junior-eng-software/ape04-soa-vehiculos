@@ -25,6 +25,8 @@ h2 { margin: 0; font-size: 18px; }
 label { display: block; font-weight: 700; font-size: 13px; margin-bottom: 8px; }
 .fila-token { display: flex; gap: 8px; }
 input { width: 100%; min-width: 0; flex: 1; border: 1px solid #becdd5; padding: 12px; border-radius: 11px; background: #fcfeff; color: #15354a; }
+.opciones-venta { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }
+.opciones-venta select { width: 100%; padding: 10px; font: inherit; border: 1px solid #becdd5; border-radius: 11px; }
 button { border-radius: 11px; min-height: 43px; padding: 10px 14px; font-weight: 750; border: 1px solid transparent; }
 .boton-primario { background: #10597b; color: #fff; flex: 1; }
 .boton-primario:hover { background: #0c4764; }

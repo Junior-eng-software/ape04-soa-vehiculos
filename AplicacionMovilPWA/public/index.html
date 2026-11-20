@@ -50,6 +50,31 @@
           <div id="mensaje" class="mensaje neutro" role="status" aria-live="polite">Inicie sesión para consultar vehículos.</div>
         </section>
 
+        <section id="panel-venta" class="panel" aria-labelledby="titulo-venta" hidden>
+          <h2 id="titulo-venta">Registrar venta</h2>
+          <form id="formulario-venta" method="post">
+            <div class="opciones-venta">
+              <div>
+                <label for="vehiculo-venta">Vehículo disponible</label>
+                <select id="vehiculo-venta" required>
+                  <option value="">Consulte los vehículos</option>
+                </select>
+              </div>
+              <div>
+                <label for="comprador-venta">Comprador</label>
+                <select id="comprador-venta" required>
+                  <option value="">Consulte los compradores</option>
+                </select>
+              </div>
+            </div>
+            <div class="acciones">
+              <button id="consultar-compradores" class="boton-secundario" type="button">Consultar compradores</button>
+              <button id="registrar-venta" class="boton-primario" type="submit" disabled>Registrar venta</button>
+            </div>
+          </form>
+          <div id="mensaje-venta" class="mensaje neutro" role="status" aria-live="polite" hidden></div>
+        </section>
+
         <section class="panel listado" aria-labelledby="titulo-vehiculos">
           <div class="seccion-cabecera resultados">
             <div class="titulo-bloque"><span class="paso">02</span><h2 id="titulo-vehiculos">Vehículos registrados</h2></div>

@@ -3,9 +3,9 @@
  * Por seguridad NUNCA intercepta /api, Authorization ni las respuestas JSON.
  * Para publicar cambios, se actualiza el sufijo de la versión del caché.
  */
-const VERSION = 'vehiculos-pwa-v2';
+const VERSION = 'vehiculos-pwa-v3';
 const RECURSOS = [
-  '/', '/index.html', '/styles.css', '/main.js', '/api.js', '/sesion.js',
+  '/', '/index.html', '/styles.css', '/main.js', '/api.js', '/sesion.js', '/ventas.js',
   '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'
 ];
 
