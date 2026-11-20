@@ -28,6 +28,8 @@ SERVICE_KEY = requerido("VENTAS_SERVICE_KEY")
 NOTIF_URL = requerido("NOTIFICACIONES_URL").rstrip("/")
 # Lee la clave de autenticación del receptor de avisos.
 NOTIF_KEY = requerido("NOTIFICACIONES_KEY")
+# Solo las ventas creadas con este modo activo ingresan al flujo AMQP.
+OUTBOX_VENTAS_ACTIVA = os.getenv("OUTBOX_VENTAS_ACTIVA", "false").lower() == "true"
 # Valida que ambas claves de integración tengan 32 caracteres o más.
 if min(len(SERVICE_KEY), len(NOTIF_KEY)) < 32:
     # Detiene el arranque con un error claro cuando falta configuración.

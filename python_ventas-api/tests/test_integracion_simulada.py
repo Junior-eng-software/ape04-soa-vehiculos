@@ -22,7 +22,8 @@ def sistema(monkeypatch):
     monkeypatch.setattr(sqlalchemy, 'create_engine', lambda *args, **kwargs: engine)
     for k,v in {'DB_USER':'pruebas','DB_HOST':'127.0.0.1','DB_NAME':'venta_vehiculos',
                 'JAVA_URL':'http://127.0.0.1:8080', 'VENTAS_SERVICE_KEY':'clave_prueba_java_con_32_caracteres_1234',
-                'NOTIFICACIONES_URL':'http://127.0.0.1:8081','NOTIFICACIONES_KEY':'clave_prueba_notif_con_32_caracteres_123'}.items():
+                'NOTIFICACIONES_URL':'http://127.0.0.1:8081','NOTIFICACIONES_KEY':'clave_prueba_notif_con_32_caracteres_123',
+                'OUTBOX_VENTAS_ACTIVA':'false'}.items():
         monkeypatch.setenv(k,v)
     # Fuerza a cargar los módulos para usar el motor temporal de pruebas.
     for name in list(sys.modules):

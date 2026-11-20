@@ -4,6 +4,7 @@ from sqlalchemy import select, or_
 # Importa el componente local correspondiente a esta responsabilidad.
 from app.models import Venta
 from app.security import filtrar_visibles
+from app.config import OUTBOX_VENTAS_ACTIVA
 
 
 # Aísla las consultas SQLAlchemy del resto de la aplicación.
@@ -37,13 +38,7 @@ class VentaRepository:
 
     # Consulta ventas sin completar y avisos aún no enviados.
     def pendientes(self):
-        # Devuelve el valor indicado a la función que realizó la llamada.
-        return self.db.scalars(select(Venta.id).where(or_(
-            # Incluye ventas PENDIENTE o EN_REVISION.
-            Venta.estado.in_(["PENDIENTE", "EN_REVISION"]),
-            # Incluye las COMPLETADAS que todavía requieren notificación.
-            (Venta.estado == "COMPLETADA") &
-            # Asigna o configura el valor de esta instrucción.
-            (Venta.notificacion != "ENVIADA")))
-            # Ordena por ID y procesa como máximo 100 por iteración.
-            .order_by(Venta.id).limit(100)).all()
+        pendientes = Venta.estado.in_(["PENDIENTE", "EN_REVISION"])
+        if not OUTBOX_VENTAS_ACTIVA:
+            pendientes = or_(pendientes, (Venta.estado == "COMPLETADA") & (Venta.notificacion == "PENDIENTE"))
+        return self.db.scalars(select(Venta.id).where(pendientes).order_by(Venta.id).limit(100)).all()

@@ -4,10 +4,13 @@ from datetime import datetime, timezone
 # Evita errores de redondeo en importes.
 from decimal import Decimal
 # Ofrece ORM, consultas y transacciones SQL.
-from sqlalchemy import String, Numeric, ForeignKey, UniqueConstraint
+from sqlalchemy import String, Numeric, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 # Importa el componente local correspondiente a esta responsabilidad.
 from app.db import Base
+
+PENDIENTE_AMQP = "PENDIENTE_AMQP"
+PUBLICADA = "PUBLICADA"
 
 
 # Define la entidad SQLAlchemy que representa a un comprador.
@@ -76,7 +79,7 @@ class Venta(Base):
     error_status: Mapped[int | None]
     # Detalle comprensible del último error de la venta.
     error_detalle: Mapped[str | None] = mapped_column(String(250))
-    # Estado del aviso: PENDIENTE o ENVIADA.
+    # HTTP legado: PENDIENTE/ENVIADA. AMQP: PENDIENTE_AMQP/PUBLICADA.
     notificacion: Mapped[str] = mapped_column(String(20), default="PENDIENTE")
     # Registra en UTC el instante de creación de la venta.
     fecha: Mapped[datetime] = mapped_column(
@@ -84,3 +87,29 @@ class Venta(Base):
         default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     # Relación ORM desde la venta hasta su comprador.
     comprador: Mapped[Comprador] = relationship(back_populates="ventas")
+
+
+class EventoOutbox(Base):
+    __tablename__ = "ventas_outbox"
+    __table_args__ = (
+        UniqueConstraint("venta_id", "tipo", name="uq_ventas_outbox_venta_tipo"),
+        Index("ix_ventas_outbox_pendientes", "publicado_utc", "proximo_intento_utc"),
+    )
+
+    evento_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(32))
+    venta_id: Mapped[int] = mapped_column(ForeignKey("ventas.id"))
+    vehiculo_id: Mapped[int]
+    fecha_utc: Mapped[datetime]
+    publicado_utc: Mapped[datetime | None]
+    proximo_intento_utc: Mapped[datetime]
+    intentos: Mapped[int] = mapped_column(default=0)
+
+    def mensaje(self):
+        return {
+            "eventoId": self.evento_id,
+            "tipo": self.tipo,
+            "ventaId": self.venta_id,
+            "vehiculoId": self.vehiculo_id,
+            "fechaUTC": self.fecha_utc.isoformat() + "Z",
+        }

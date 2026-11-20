@@ -6,7 +6,7 @@ from app.db import Base, engine
 # Obtiene parámetros del sistema y variables de entorno.
 from app import models  # Importar modelos para poblar Base.metadata.
 # Lista blanca de tablas que puede manejar Python, sin tocar las Java.
-TABLAS_PYTHON = {"compradores", "ventas"}
+TABLAS_PYTHON = {"compradores", "ventas", "ventas_outbox"}
 # Referencia las definiciones de entidades SQLAlchemy.
 target_metadata = Base.metadata
 

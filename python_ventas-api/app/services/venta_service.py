@@ -3,6 +3,7 @@
 import hashlib
 # Interpreta o genera cuerpos JSON.
 import json
+from datetime import datetime, timezone
 # Genera identificadores únicos.
 from uuid import uuid4
 # Evita errores de redondeo en importes.
@@ -13,12 +14,12 @@ import httpx
 from sqlalchemy.exc import IntegrityError
 # Importa el componente local correspondiente a esta responsabilidad.
 from app.db import SessionLocal
-from app.models import Venta, Comprador
+from app.models import Comprador, EventoOutbox, PENDIENTE_AMQP, Venta
 # Importa las consultas SQL de ventas desde la capa Repository.
 from app.repositories.venta_repository import VentaRepository
 from app.clients.vehiculos_client import VehiculosClient, FalloRemoto
 # Importa el componente local correspondiente a esta responsabilidad.
-from app.config import NOTIF_URL, NOTIF_KEY
+from app.config import NOTIF_URL, NOTIF_KEY, OUTBOX_VENTAS_ACTIVA
 from app.errors import ApiError
 from app.security import propietario
 # Prepara el cliente HTTP de reservas de Java.
@@ -37,7 +38,7 @@ def salida(v):
                 if v.precio_acordado is not None else None,
             # Incluye moneda y estado de la venta.
             "moneda": v.moneda, "estado": v.estado,
-            # Indica si el receptor procesó la notificación.
+            # PUBLICADA indica confirmación del broker. ENVIADA es el aviso HTTP legado.
             "notificacion": v.notificacion,
             # Presenta la fecha en formato ISO-8601 UTC.
             "fechaUTC": v.fecha.isoformat() + "Z"}
@@ -74,7 +75,8 @@ def crear(datos, clave, usuario):
                       # Asocia IDs y deja el precio pendiente de Java.
                       vehiculo_id=datos.vehiculoId, comprador_id=datos.compradorId,
                       # Asocia la clave de petición y su huella para reintentos seguros.
-                      idempotency_key=clave, request_hash=huella)
+                      idempotency_key=clave, request_hash=huella,
+                      notificacion=PENDIENTE_AMQP if OUTBOX_VENTAS_ACTIVA else "PENDIENTE")
             # Prepara el INSERT de la nueva venta.
             db.add(v)
             # Empieza una sección controlada para recuperar los errores esperados.
@@ -103,8 +105,8 @@ def crear(datos, clave, usuario):
         id = v.id
     # Solicita a Java reservar o confirmar la operación de forma recuperable.
     procesar(id)
-    # Envía aviso solo si la venta terminó COMPLETADA.
-    notificar(id)
+    if not OUTBOX_VENTAS_ACTIVA:
+        notificar(id)
     # Abre una sesión SQLAlchemy y la cierra al salir del bloque.
     with SessionLocal() as db:
         # Recarga la venta para devolver su estado actualizado.
@@ -162,6 +164,9 @@ def procesar(id):
                         return
                     # Vuelve a lanzar la excepción original si tampoco existe tras el conflicto.
                     raise
+            if (not isinstance(r, dict) or r.get("operacionId") != v.operacion_id
+                    or r.get("vehiculoId") != v.vehiculo_id or not r.get("id")):
+                raise FalloRemoto(502, "Reserva no corresponde a la venta")
             # Guarda el UUID de la reserva confirmable.
             v.reserva_id = r["id"]
             # Copia el precio oficial comunicado por Java.
@@ -181,13 +186,20 @@ def procesar(id):
                 # Confirma la reserva: Java actualiza vehículo a VENDIDO.
                 r = remote.confirmar(r["id"])
             # Exige una respuesta coherente antes de finalizar la venta.
-            if r["estado"] != "CONFIRMADA":
+            if (not isinstance(r, dict) or r.get("estado") != "CONFIRMADA"
+                    or r.get("id") != v.reserva_id or r.get("operacionId") != v.operacion_id
+                    or r.get("vehiculoId") != v.vehiculo_id):
                 # Trata el estado inesperado como un problema de integración.
                 raise FalloRemoto(502, "Estado de reserva inesperado")
             # Solo se completa después de obtener CONFIRMADA de Java.
             v.estado = "COMPLETADA"
             # Guarda el código de estado para la respuesta HTTP.
             v.error_status = None; v.error_detalle = None
+            if v.notificacion == PENDIENTE_AMQP:
+                ahora = datetime.now(timezone.utc).replace(tzinfo=None)
+                db.add(EventoOutbox(evento_id=str(uuid4()), tipo="VENTA_CONFIRMADA",
+                                   venta_id=v.id, vehiculo_id=v.vehiculo_id,
+                                   fecha_utc=ahora, proximo_intento_utc=ahora))
         # Un timeout o cuerpo inválido necesita investigación, no duplicar venta.
         except (FalloRemoto, ValueError, KeyError) as ex:
             # Permite que el worker vuelva a consultar a Java más tarde.
@@ -198,12 +210,14 @@ def procesar(id):
 
 # Publica un aviso de venta exitosa al servicio Java receptor.
 def notificar(id):
+    if OUTBOX_VENTAS_ACTIVA:
+        return
     # Abre transacción que hace commit automático si no hay excepción.
     with SessionLocal.begin() as db:
         # Obtiene la venta con bloqueo SQL para evitar procesamiento concurrente.
         v = VentaRepository(db).bloquear(id)
         # Si no existe, preparará una nueva operación.
-        if v is None or v.estado != "COMPLETADA" or v.notificacion == "ENVIADA":
+        if v is None or v.estado != "COMPLETADA" or v.notificacion != "PENDIENTE":
             # Finaliza inmediatamente porque ya no hay trabajo pendiente.
             return
         # Empieza una sección controlada para recuperar los errores esperados.
