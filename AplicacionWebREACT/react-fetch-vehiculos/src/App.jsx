@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { listarVehiculos } from './api/vehiculosApi.js';
+import Ventas from './Ventas.jsx';
 import './App.css';
 
 // Ecuador usa dólares estadounidenses. No modifica el precio de la API.
@@ -17,7 +18,7 @@ function mostrarPrecio(precio) {
 
 export default function App() {
   // useState guarda datos de la pantalla. Cuando cambian, React la actualiza.
-  const [token, setToken] = useState('');
+  const [{ token, revision }, setSesion] = useState({ token: '', revision: 0 });
   const [mostrarToken, setMostrarToken] = useState(false);
   const [vehiculos, setVehiculos] = useState([]);
   const [marca, setMarca] = useState('');
@@ -26,6 +27,19 @@ export default function App() {
   const [mensaje, setMensaje] = useState('Listo para consultar.');
   const [error, setError] = useState('');
   const [codigoHttp, setCodigoHttp] = useState(null);
+  const consultaVehiculos = useRef(0);
+
+  function cambiarToken(nuevoToken) {
+    if (nuevoToken === token) return;
+    consultaVehiculos.current++;
+    setSesion((actual) => ({ token: nuevoToken, revision: actual.revision + 1 }));
+    setVehiculos([]);
+    setSeleccionado(null);
+    setCargando(false);
+    setCodigoHttp(null);
+    setError('');
+    setMensaje('Listo para consultar.');
+  }
 
   // El filtro se aplica a los vehículos ya recibidos; no consulta MySQL.
   const visibles = vehiculos.filter((v) =>
@@ -35,6 +49,7 @@ export default function App() {
   // Evento ejecutado al pulsar "Consultar vehículos".
   async function consultarVehiculos(evento) {
     evento.preventDefault(); // Evita que el navegador recargue la página.
+    const consulta = ++consultaVehiculos.current;
     setCargando(true);
     setError('');
     setMensaje('Consultando la API de vehículos...');
@@ -45,17 +60,19 @@ export default function App() {
     try {
       // La conexión HTTP se realiza en otro archivo, no en la interfaz.
       const resultado = await listarVehiculos(token);
+      if (consulta !== consultaVehiculos.current) return;
       setVehiculos(resultado.vehiculos);
       setCodigoHttp(resultado.codigoHttp);
       setMensaje(`Consulta correcta: ${resultado.vehiculos.length} vehículos.`);
     } catch (e) {
+      if (consulta !== consultaVehiculos.current) return;
       // Errores 401, 403 y red quedan visibles para el usuario.
       setCodigoHttp(e.status ?? null);
       setError(e.message);
       setMensaje('La consulta no pudo completarse.');
     } finally {
       // Se ejecuta tanto cuando fetch tiene éxito como cuando falla.
-      setCargando(false);
+      if (consulta === consultaVehiculos.current) setCargando(false);
     }
   }
 
@@ -84,7 +101,7 @@ export default function App() {
               spellCheck="false"
               placeholder="Pegar token JWT obtenido previamente"
               value={token}
-              onChange={(e) => setToken(e.target.value)}
+              onChange={(e) => cambiarToken(e.target.value)}
             />
             <button
               className="secundario"
@@ -105,7 +122,7 @@ export default function App() {
               type="button"
               disabled={cargando}
               onClick={() => {
-                setToken('');
+                cambiarToken('');
                 setMostrarToken(false);
               }}
             >
@@ -200,6 +217,7 @@ export default function App() {
           <p className="ayuda">Después de consultar, seleccione el ID de una fila para ver sus datos.</p>
         )}
       </section>
+      <Ventas key={revision} token={token} />
     </main>
   );
 }
