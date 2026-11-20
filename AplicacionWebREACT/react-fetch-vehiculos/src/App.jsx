@@ -71,7 +71,7 @@ export default function App() {
         <h2 id="titulo-acceso">1. Conexión con la API</h2>
         <p className="ayuda">
           La aplicación consulta <code>GET /api/vehiculos</code> mediante el
-          proxy local hacia <code>127.0.0.1:8080</code>.
+          proxy local hacia NGINX en <code>127.0.0.1:8090</code>.
         </p>
 
         <form onSubmit={consultarVehiculos}>

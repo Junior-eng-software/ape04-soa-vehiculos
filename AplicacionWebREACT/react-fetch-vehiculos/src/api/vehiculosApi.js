@@ -4,7 +4,7 @@
  * Responsabilidad: enviar GET, agregar JWT e interpretar HTTP/JSON.
  * No contiene código visual, consultas SQL ni reglas de negocio.
  *
- * La ruta es relativa porque el proxy de Vite (/api) conecta con Java.
+ * La ruta relativa pasa por el proxy de Vite (/api) hacia NGINX.
  */
 export async function listarVehiculos(token) {
   // Headers es el objeto estándar del navegador para cabeceras HTTP.
