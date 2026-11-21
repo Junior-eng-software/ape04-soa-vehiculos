@@ -51,6 +51,7 @@ public partial class FormPrincipal : Form
         foreach (Vista vista in vistas)
             vista.Actualizar.Click += async (_, _) => await CargarAsync(vista);
         ConfigurarRegistro();
+        ConfigurarFiltros();
         ActualizarAcciones();
     }
 
@@ -121,6 +122,7 @@ public partial class FormPrincipal : Form
         versionSesion++;
         identidad = null;
         ActualizarCatalogoRegistro(null);
+        ReconstruirFiltros();
         foreach (Vista vista in vistas)
         {
             vista.Grilla.DataSource = null;
@@ -163,12 +165,20 @@ public partial class FormPrincipal : Form
             if (!EsVersionActual(version))
                 return;
 
-            vista.Grilla.DataSource = registros;
             if (vista == Vehiculos)
+            {
                 ActualizarCatalogoRegistro((IReadOnlyList<Vehiculo>)registros);
-            vista.Total = registros.Count;
+                ReconstruirFiltros();
+                AplicarFiltros();
+            }
+            else
+            {
+                vista.Grilla.DataSource = registros;
+                vista.Total = registros.Count;
+            }
             vista.UltimaActualizacion = DateTime.Now;
-            Informar(vista, confirmacion ?? (registros.Count == 0 ? "No hay registros disponibles." : "Listado actualizado."),
+            Informar(vista, confirmacion ?? (vista == Vehiculos ? MensajeCatalogo() :
+                registros.Count == 0 ? "No hay registros disponibles." : "Listado actualizado."),
                 confirmacion is null ? HttpStatusCode.OK : HttpStatusCode.Created);
         }
         catch (Exception ex) when (EsFalloHttp(ex))
@@ -184,7 +194,10 @@ public partial class FormPrincipal : Form
                     {
                         vista.Grilla.DataSource = null;
                         if (vista == Vehiculos)
+                        {
                             ActualizarCatalogoRegistro(null);
+                            ReconstruirFiltros();
+                        }
                         vista.Total = null;
                         vista.UltimaActualizacion = null;
                     }
@@ -305,6 +318,7 @@ public partial class FormPrincipal : Form
         btnRegistrar.Enabled = PuedeRegistrar(Vehiculos);
         btnRegistrarComprador.Enabled = PuedeRegistrar(Compradores);
         ActualizarAyudaRegistro();
+        HabilitarFiltros();
     }
 
     private bool PuedeRegistrar(Vista vista) =>
@@ -329,7 +343,9 @@ public partial class FormPrincipal : Form
         lblEstado.ForeColor = vista.Error ? Color.Firebrick : TextoSecundario;
         HttpStatusCode? codigo = vista.Codigo ?? codigoSesion;
         lblHttp.Text = codigo is null ? "" : $"HTTP {(int)codigo.Value}";
-        lblTotal.Text = vista.Total is int total ? $"Total: {total}" : "Total: —";
+        lblTotal.Text = vista.Total is int total
+            ? vista == Vehiculos && catalogoRegistro is not null ? $"{total} de {catalogoRegistro.Count} vehículos" : $"Total: {total}"
+            : "Total: —";
         lblActualizacion.Text = vista.UltimaActualizacion is DateTime fecha
             ? $"Actualizado: {fecha.ToString("HH:mm:ss", Ecuador)}" : "Actualizado: —";
     }

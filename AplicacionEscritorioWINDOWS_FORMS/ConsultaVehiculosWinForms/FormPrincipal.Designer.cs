@@ -222,7 +222,7 @@ partial class FormPrincipal
         lblAyudaVehiculo = CrearAyudaRegistro();
         lblAyudaComprador = CrearAyudaRegistro();
         pestanas.TabPages.Add(CrearPestana("Vehículos", dgvVehiculos, btnConsultar, camposVehiculo,
-            btnRegistrar, lblAyudaVehiculo));
+            btnRegistrar, lblAyudaVehiculo, CrearBarraFiltros()));
         pestanas.TabPages.Add(CrearPestana("Compradores", dgvCompradores, btnConsultarCompradores, camposComprador,
             btnRegistrarComprador, lblAyudaComprador));
         pestanas.TabPages.Add(CrearPestana("Ventas", dgvVentas, btnConsultarVentas));
@@ -230,11 +230,12 @@ partial class FormPrincipal
     }
 
     private static TabPage CrearPestana(string titulo, DataGridView grilla, Button actualizar,
-        TableLayoutPanel? campos = null, Button? registrar = null, Label? ayuda = null)
+        TableLayoutPanel? campos = null, Button? registrar = null, Label? ayuda = null, Control? filtros = null)
     {
         var pestana = new TabPage(titulo) { Padding = new Padding(12), BackColor = Color.White };
-        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -252,7 +253,9 @@ partial class FormPrincipal
         panel.Controls.Add(acciones, 0, 1);
         if (ayuda is not null)
             panel.Controls.Add(ayuda, 0, 2);
-        panel.Controls.Add(grilla, 0, 3);
+        if (filtros is not null)
+            panel.Controls.Add(filtros, 0, 3);
+        panel.Controls.Add(grilla, 0, 4);
         pestana.Controls.Add(panel);
         return pestana;
     }
