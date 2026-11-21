@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { iniciarSesion, listarVehiculos, normalizarToken } from '../public/api.js';
+import { ErrorAcceso, iniciarSesion, listarVehiculos, normalizarToken } from '../public/api.js';
 import { crearSesion } from '../public/sesion.js';
 
 test('acceso envía solo credenciales personales y conserva el JWT en memoria hasta cierre o caducidad', async () => {
@@ -24,15 +24,30 @@ test('acceso envía solo credenciales personales y conserva el JWT en memoria ha
   assert.equal(sesion.leer(), null);
 });
 
-test('acceso presenta 401/403, respuesta inválida y error de red sin incorporar el cuerpo remoto', async () => {
-  for (const estado of [401, 403]) {
+test('acceso distingue HTTP, cuerpo inválido y error de transporte sin incluir detalles privados', async () => {
+  for (const estado of [400, 401, 403, 500, 502, 503, 504]) {
     await assert.rejects(iniciarSesion('persona', 'clave', async () => new Response('privado', { status: estado })),
-      (error) => error.message.startsWith('HTTP ' + estado) && !error.message.includes('privado'));
+      (error) => error instanceof ErrorAcceso && error.message.startsWith('HTTP ' + estado)
+        && !error.message.includes('privado'));
   }
-  await assert.rejects(iniciarSesion('persona', 'clave', async () => Response.json({ access_token: 'invalido' })),
-    /respuesta de acceso inválida/);
+  for (const respuesta of [new Response(), new Response('privado'), Response.json({ access_token: 'invalido' })]) {
+    await assert.rejects(iniciarSesion('persona', 'clave', async () => respuesta), /respuesta de acceso inválida/);
+  }
   await assert.rejects(iniciarSesion('persona', 'clave', async () => { throw new Error('privado'); }),
     /No se pudo conectar/);
+});
+
+test('acceso cancela una respuesta con cuerpo detenido y muestra el tiempo agotado', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const acceso = iniciarSesion('persona', 'clave simulada', async (_ruta, { signal }) => ({
+    status: 200,
+    json: () => new Promise((_, rechazar) => {
+      signal.addEventListener('abort', () => rechazar(signal.reason), { once: true });
+    }),
+  }));
+  await Promise.resolve();
+  t.mock.timers.tick(15000);
+  await assert.rejects(acceso, /no respondió a tiempo/);
 });
 
 // Los datos de estas pruebas son simulados y no sustituyen a la API real.

@@ -4,88 +4,121 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#103b56" />
-    <meta name="description" content="Consulta móvil de vehículos a través de una API REST con autenticación JWT." />
+    <meta name="description" content="Consulta el catálogo y gestiona ventas de vehículos." />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <title>Vehículos Móvil · PWA</title>
+    <title>Gestión automotriz</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css" />
-    <script type="module" src="/main.js"></script>
+    <link rel="stylesheet" href="/styles.css?v=8" />
   </head>
   <body>
     <div class="app">
       <header class="encabezado">
         <div class="logo" aria-hidden="true">🚙</div>
-        <div>
-          <p class="eyebrow">APLICACIÓN MÓVIL · PWA</p>
-          <h1>Consulta de vehículos</h1>
-          <p class="subtitulo">Cliente de la API Java Spring Boot</p>
+        <h1>Gestión automotriz</h1>
+        <div id="sesion-activa" class="sesion-cabecera" hidden>
+          <span>Sesión activa</span>
+          <button id="cerrar-sesion" class="boton-discreto" type="button">Cerrar sesión</button>
         </div>
       </header>
 
       <main>
-        <section class="panel" aria-labelledby="titulo-acceso">
-          <div class="seccion-cabecera">
-            <span class="paso">01</span>
-            <h2 id="titulo-acceso">Acceso con JWT</h2>
-          </div>
+        <section id="panel-acceso" class="panel" aria-labelledby="titulo-acceso">
+          <h2 id="titulo-acceso" class="seccion-cabecera">Iniciar sesión</h2>
           <form id="formulario" method="post">
             <label for="usuario">Usuario</label>
             <input id="usuario" autocomplete="username" autocapitalize="none" spellcheck="false" required />
             <label for="clave">Contraseña</label>
             <input id="clave" type="password" autocomplete="current-password" required />
             <div class="acciones">
-              <button id="ingresar" class="boton-primario" type="submit">Iniciar sesión</button>
+              <button id="ingresar" class="boton-primario" type="submit" disabled>Iniciar sesión</button>
             </div>
           </form>
-          <div id="sesion-activa" hidden>
-            <div class="acciones">
-              <button id="consultar" class="boton-primario" type="button">Consultar vehículos</button>
-              <button id="cerrar-sesion" class="boton-discreto" type="button">Cerrar sesión</button>
-            </div>
-          </div>
-          <div id="mensaje" class="mensaje neutro" role="status" aria-live="polite">Inicie sesión para consultar vehículos.</div>
+          <div id="mensaje" class="mensaje neutro" role="status" aria-live="polite">Preparando el inicio de sesión…</div>
+          <noscript><p class="mensaje error">Active JavaScript y vuelva a cargar la aplicación para iniciar sesión.</p></noscript>
         </section>
 
         <section id="panel-venta" class="panel" aria-labelledby="titulo-venta" hidden>
-          <h2 id="titulo-venta">Registrar venta</h2>
+          <div class="seccion-cabecera resultados">
+            <h2 id="titulo-venta">Registrar venta</h2>
+            <button id="actualizar-listas" class="boton-discreto boton-compacto" type="button">Actualizar listas</button>
+          </div>
           <form id="formulario-venta" method="post">
             <div class="opciones-venta">
               <div>
                 <label for="vehiculo-venta">Vehículo disponible</label>
                 <select id="vehiculo-venta" required>
-                  <option value="">Consulte los vehículos</option>
+                  <option value="">Seleccione un vehículo</option>
                 </select>
+                <p id="estado-lista-vehiculos" class="estado-lista" role="status"></p>
               </div>
               <div>
                 <label for="comprador-venta">Comprador</label>
                 <select id="comprador-venta" required>
-                  <option value="">Consulte los compradores</option>
+                  <option value="">Seleccione un comprador</option>
                 </select>
+                <p id="estado-lista-compradores" class="estado-lista" role="status"></p>
               </div>
             </div>
             <div class="acciones">
-              <button id="consultar-compradores" class="boton-secundario" type="button">Consultar compradores</button>
+              <button id="limpiar-seleccion" class="boton-secundario" type="button" disabled>Limpiar selección</button>
               <button id="registrar-venta" class="boton-primario" type="submit" disabled>Registrar venta</button>
             </div>
           </form>
           <div id="mensaje-venta" class="mensaje neutro" role="status" aria-live="polite" hidden></div>
+          <div class="acciones" id="acciones-venta-reciente" hidden>
+            <button id="consultar-venta-reciente" class="boton-secundario" type="button">Consultar estado de esta venta</button>
+          </div>
         </section>
 
-        <section class="panel listado" aria-labelledby="titulo-vehiculos">
+        <section id="panel-estado-venta" class="panel" aria-labelledby="titulo-estado-venta" hidden>
+          <h2 id="titulo-estado-venta">Estado de una venta</h2>
+          <form id="formulario-estado-venta">
+            <label for="id-estado-venta">ID de venta</label>
+            <div class="acciones acciones-estado-venta">
+              <input id="id-estado-venta" inputmode="numeric" autocomplete="off" required />
+              <button id="consultar-estado-venta" class="boton-secundario" type="submit">Consultar estado</button>
+            </div>
+          </form>
+          <div id="mensaje-estado-venta" class="mensaje neutro" role="status" hidden></div>
+          <div id="detalle-estado-venta"></div>
+        </section>
+
+        <section id="panel-catalogo" class="panel listado" aria-labelledby="titulo-vehiculos" hidden>
           <div class="seccion-cabecera resultados">
-            <div class="titulo-bloque"><span class="paso">02</span><h2 id="titulo-vehiculos">Vehículos registrados</h2></div>
-            <span id="contador" class="contador">0 vehículos</span>
+            <h2 id="titulo-vehiculos">Vehículos registrados</h2>
+            <span id="contador" class="contador" role="status">0 vehículos</span>
           </div>
-          <div id="vehiculos" class="vehiculos">
-            <div class="vacio">No hay información todavía. Se debe realizar una consulta para mostrar vehículos.</div>
+          <div id="filtros-catalogo" class="filtros-catalogo" hidden>
+            <div class="filtros-campos">
+              <div><label for="filtro-marca">Marca</label><select id="filtro-marca"></select></div>
+              <div><label for="filtro-modelo">Modelo</label><select id="filtro-modelo"></select></div>
+              <div><label for="filtro-estado">Estado</label><select id="filtro-estado"></select></div>
+            </div>
+            <button id="limpiar-filtros" class="boton-discreto boton-compacto" type="button">Limpiar filtros</button>
           </div>
+          <div id="vehiculos" class="vehiculos"></div>
+          <button id="mostrar-mas" class="boton-secundario mostrar-mas" type="button" hidden>Mostrar más</button>
         </section>
       </main>
-      <footer><span id="conexion">Comprobando conexión…</span> · Datos proporcionados por la API REST</footer>
+      <footer id="conexion">Comprobando conexión…</footer>
     </div>
+    <script type="module">
+      const mensaje = document.querySelector('#mensaje');
+      import('/main.js?v=8').then(() => {
+        mensaje.textContent = 'Ingrese sus credenciales para continuar.';
+        document.querySelector('#ingresar').disabled = false;
+      }).catch(() => {
+        mensaje.className = 'mensaje error';
+        mensaje.textContent = 'No se pudo cargar el formulario. Compruebe la conexión y recargue la aplicación.';
+      });
+
+      if ('serviceWorker' in navigator && window.isSecureContext) {
+        navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
+      }
+    </script>
   </body>
 </html>

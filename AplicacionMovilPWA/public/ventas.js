@@ -28,6 +28,43 @@ export async function listarCompradores(jwt, signal, ejecutarFetch = fetch) {
   return compradores;
 }
 
+export async function consultarVenta(jwt, id, signal, ejecutarFetch = fetch) {
+  if (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id))) {
+    throw new Error('Ingrese un ID de venta entero y positivo.');
+  }
+  const limite = AbortSignal.timeout(15000);
+  const cancelacion = signal ? AbortSignal.any([signal, limite]) : limite;
+  let respuesta;
+  let venta;
+  try {
+    respuesta = await ejecutarFetch('/api/ventas/' + id, {
+      headers: { Authorization: 'Bearer ' + jwt, Accept: 'application/json' },
+      cache: 'no-store', signal: cancelacion, redirect: 'error',
+    });
+    if (respuesta.status === 200) venta = await respuesta.json();
+  } catch (error) {
+    if (limite.aborted) throw new Error('Se agotó el tiempo de espera al consultar la venta.');
+    if (error instanceof SyntaxError) throw new Error('La API no devolvió los datos esperados de la venta.');
+    throw new Error('Servicio de ventas no disponible por un fallo de conexión.');
+  }
+
+  const codigo = respuesta.status;
+  if (codigo === 403) throw errorHttp(codigo, 'No tiene permiso para consultar esta venta.');
+  if (codigo === 404) throw errorHttp(codigo, 'Venta inexistente.');
+  if (codigo === 408 || codigo === 504) throw errorHttp(codigo, 'Se agotó el tiempo de espera al consultar la venta.');
+  if (codigo >= 500) throw errorHttp(codigo, 'Servicio de ventas no disponible.');
+  if (codigo !== 200) throw errorHttp(codigo);
+
+  if (venta?.id !== Number(id) || !['PENDIENTE', 'EN_REVISION', 'FALLIDA', 'COMPLETADA'].includes(venta.estado)
+      || ![venta.vehiculoId, venta.compradorId].every((valor) => Number.isSafeInteger(valor) && valor > 0)
+      || !(venta.precioAcordado === null || typeof venta.precioAcordado === 'string')
+      || !(venta.moneda === null || typeof venta.moneda === 'string')
+      || typeof venta.fechaUTC !== 'string' || !Number.isFinite(Date.parse(venta.fechaUTC))) {
+    throw new Error('La API no devolvió los datos esperados de la venta.');
+  }
+  return venta;
+}
+
 export async function registrarVenta(jwt, datos, clave, signal, ejecutarFetch = fetch) {
   const limite = AbortSignal.timeout(40000);
   const cancelacion = signal ? AbortSignal.any([signal, limite]) : limite;

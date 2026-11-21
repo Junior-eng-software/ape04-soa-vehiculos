@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { crearServidor } from '../server.mjs';
-import { crearRegistroVenta, listarCompradores, registrarVenta } from '../public/ventas.js';
+import { consultarVenta, crearRegistroVenta, listarCompradores, registrarVenta } from '../public/ventas.js';
 
 const seleccion = { vehiculoId: 7, compradorId: 3 };
 const venta = {
   id: 19, ...seleccion, estado: 'COMPLETADA', precioAcordado: '12345.60', moneda: 'USD',
 };
+const detalleVenta = { ...venta, fechaUTC: '2026-11-20T23:26:47Z' };
 const clave = 'clave-simulada-2026';
 
 async function escuchar(servidor, t) {
@@ -132,6 +133,13 @@ test('202 conserva la operación y un 401 posterior permite advertir antes de li
       return Response.json(codigo === 202 ? pendiente : {}, { status: codigo });
     }));
   assert.deepEqual(await registro.registrar('operador-simulado', seleccion), { codigoHttp: 202, venta: pendiente });
+  const detalle = { ...detalleVenta, ...pendiente };
+  assert.deepEqual(await consultarVenta('operador-simulado', pendiente.id, undefined, async (ruta, opciones) => {
+    assert.equal(ruta, '/api/ventas/19');
+    assert.equal(opciones.headers['Idempotency-Key'], undefined);
+    return Response.json(detalle);
+  }), detalle);
+  assert.equal(registro.pendiente(), true);
   codigo = 401;
   await assert.rejects(registro.registrar('vencido-simulado', seleccion), { codigoHttp: 401 });
   assert.equal(claves[0], claves[1]);
@@ -139,6 +147,96 @@ test('202 conserva la operación y un 401 posterior permite advertir antes de li
   assert.equal(registro.pendiente(), true);
   registro.limpiar();
   assert.equal(registro.pendiente(), false);
+});
+
+test('GET individual reenvía Bearer y conserva la decisión de propietario o ADMIN', async (t) => {
+  let llamadas = 0;
+  const apiBase = await escuchar(createServer((req, res) => {
+    llamadas++;
+    assert.equal(req.method, 'GET');
+    for (const nombre of ['x-service-key', 'x-role', 'idempotency-key']) {
+      assert.equal(req.headers[nombre], undefined);
+    }
+    const token = req.headers.authorization;
+    const codigo = !token || token === 'Bearer vencido-simulado' ? 401
+      : req.url === '/api/ventas/999' ? 404
+      : ['Bearer propietario-simulado', 'Bearer admin-simulado'].includes(token) ? 200 : 403;
+    assert.match(req.url, /^\/api\/ventas\/(19|999)$/);
+    res.writeHead(codigo, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(codigo === 200 ? detalleVenta : { codigo: 'error-simulado' }));
+  }), t);
+  const frontend = await escuchar(crearServidor({ apiBase }), t);
+  const descargar = async (ruta, opciones) => {
+    const headers = new Headers(opciones.headers);
+    headers.set('X-Service-Key', 'ignorar');
+    headers.set('X-Role', 'ADMIN');
+    headers.set('Idempotency-Key', clave);
+    const respuesta = await fetch(frontend + ruta, { ...opciones, headers });
+    assert.equal(respuesta.headers.get('cache-control'), 'no-store');
+    assert.equal(respuesta.headers.get('vary'), 'Authorization');
+    return respuesta;
+  };
+
+  for (const token of ['propietario-simulado', 'admin-simulado']) {
+    assert.deepEqual(await consultarVenta(token, 19, undefined, descargar), detalleVenta);
+  }
+  await assert.rejects(consultarVenta('ajeno-simulado', 19, undefined, descargar), { codigoHttp: 403 });
+  await assert.rejects(consultarVenta('vencido-simulado', 19, undefined, descargar), { codigoHttp: 401 });
+  await assert.rejects(consultarVenta('admin-simulado', 999, undefined, descargar), { codigoHttp: 404 });
+  assert.equal((await fetch(frontend + '/api/ventas/19')).status, 401);
+  for (const ruta of ['/api/ventas/0', '/api/ventas/-3', '/api/ventas/x', '/api/ventas/9007199254740992']) {
+    assert.equal((await fetch(frontend + ruta)).status, 400);
+  }
+  assert.equal((await fetch(frontend + '/api/ventas')).status, 404);
+  assert.equal((await fetch(frontend + '/api/ventas/19/interna')).status, 404);
+  assert.equal((await fetch(frontend + '/api/ventas/19', { method: 'POST' })).status, 404);
+  assert.equal(llamadas, 6);
+});
+
+test('consulta reconoce todos los estados y conserva importe decimal y nulos', async () => {
+  for (const estado of ['COMPLETADA', 'EN_REVISION', 'FALLIDA', 'PENDIENTE']) {
+    const esperado = estado === 'COMPLETADA' ? detalleVenta
+      : { ...detalleVenta, estado, precioAcordado: null, moneda: null };
+    assert.deepEqual(await consultarVenta('jwt-simulado', '19', undefined,
+      async () => Response.json(esperado)), esperado);
+  }
+  for (const id of ['', '19/otras', '1e2', '0', '9007199254740992']) {
+    await assert.rejects(consultarVenta('jwt-simulado', id, undefined, async () => {
+      assert.fail('El ID inválido no debe enviarse');
+    }), /ID de venta entero y positivo/);
+  }
+  for (const datos of [null, { ...detalleVenta, id: 20 }, { ...detalleVenta, estado: 'DESCONOCIDO' }]) {
+    await assert.rejects(consultarVenta('jwt-simulado', 19, undefined,
+      async () => Response.json(datos)), /datos esperados/);
+  }
+});
+
+test('consulta distingue indisponibilidad, errores de red, timeout y cancelación', async (t) => {
+  for (const codigo of [502, 503, 504]) {
+    await assert.rejects(consultarVenta('jwt-simulado', 19, undefined,
+      async () => new Response(null, { status: codigo })), {
+      codigoHttp: codigo, message: codigo === 504 ? /tiempo de espera/ : /no disponible/,
+    });
+  }
+  await assert.rejects(consultarVenta('jwt-simulado', 19, undefined, async () => {
+    throw new TypeError('Conexión interrumpida');
+  }), /fallo de conexión/);
+
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  t.mock.method(AbortSignal, 'timeout', () => timeout(20));
+  const esperarAborto = async (_ruta, { signal }) => {
+    await new Promise((resolver) => setTimeout(resolver, 100));
+    signal.throwIfAborted();
+  };
+  await assert.rejects(consultarVenta('jwt-simulado', 19, undefined, esperarAborto), /tiempo de espera/);
+
+  const actual = new AbortController();
+  const consulta = consultarVenta('jwt-simulado', 19, actual.signal, async (_ruta, { signal }) => {
+    await once(signal, 'abort');
+    signal.throwIfAborted();
+  });
+  actual.abort();
+  await assert.rejects(consulta, /fallo de conexión/);
 });
 
 test('clasifica errores definitivos, fallos de red y respuestas inesperadas', async () => {

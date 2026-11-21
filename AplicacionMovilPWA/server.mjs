@@ -134,7 +134,11 @@ export function crearServidor({
     if (url.pathname.startsWith('/api/')) {
       const venta = url.pathname === '/api/ventas' && peticion.method === 'POST';
       const listado = ['/api/vehiculos', '/api/compradores'].includes(url.pathname) && peticion.method === 'GET';
-      if (!venta && !listado) {
+      const detalle = peticion.method === 'GET' && /^\/api\/ventas\/([^/]+)$/.exec(url.pathname);
+      if (detalle && (!/^[1-9]\d*$/.test(detalle[1]) || !Number.isSafeInteger(Number(detalle[1])))) {
+        return responderJson(respuesta, 400, { error: 'El ID de venta debe ser un entero positivo válido.' });
+      }
+      if (!venta && !listado && !detalle) {
         return responderJson(respuesta, 404, { error: 'Endpoint no disponible.' });
       }
       if (venta && !origenLocalPermitido(peticion)) {

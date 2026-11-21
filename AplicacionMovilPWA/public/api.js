@@ -7,36 +7,51 @@ export function normalizarToken(entrada = '') {
   return String(entrada).trim().replace(/^Bearer\s+/i, '').trim();
 }
 
+export class ErrorAcceso extends Error {}
+
 export async function iniciarSesion(username, password, ejecutarFetch = fetch, signal) {
-  let respuesta;
+  const solicitud = new AbortController();
+  const cancelar = () => solicitud.abort();
+  const limite = setTimeout(cancelar, 15000);
+  if (signal?.aborted) cancelar();
+  signal?.addEventListener('abort', cancelar, { once: true });
   try {
-    respuesta = await ejecutarFetch('/api/login', {
+    const respuesta = await ejecutarFetch('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ username, password }),
       cache: 'no-store',
-      signal,
+      redirect: 'error',
+      signal: solicitud.signal,
     });
-  } catch {
-    throw new Error('No se pudo conectar con el servicio de acceso.');
+    if (respuesta.status !== 200) {
+      const mensajes = {
+        400: 'Revise el usuario y la contraseña introducidos.',
+        401: 'Usuario o contraseña no válidos.',
+        403: 'Acceso no permitido.',
+        504: 'El servicio de acceso no respondió a tiempo.',
+      };
+      const mensaje = mensajes[respuesta.status] || (respuesta.status >= 500
+        ? 'El servicio de acceso no está disponible.' : 'No se pudo completar el acceso.');
+      throw new ErrorAcceso(`HTTP ${respuesta.status}: ${mensaje}`);
+    }
+    const datos = await respuesta.json();
+    if (typeof datos?.access_token !== 'string'
+        || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(datos.access_token)
+        || !Number.isInteger(datos.expires_in) || datos.expires_in <= 0
+        || datos.expires_in > 2147483) {
+      throw new ErrorAcceso('El servidor devolvió una respuesta de acceso inválida.');
+    }
+    return { jwt: datos.access_token, segundos: datos.expires_in };
+  } catch (error) {
+    if (error instanceof ErrorAcceso) throw error;
+    if (solicitud.signal.aborted) throw new ErrorAcceso('El servicio de acceso no respondió a tiempo.');
+    if (error instanceof SyntaxError) throw new ErrorAcceso('El servidor devolvió una respuesta de acceso inválida.');
+    throw new ErrorAcceso('No se pudo conectar con el servicio de acceso.');
+  } finally {
+    clearTimeout(limite);
+    signal?.removeEventListener('abort', cancelar);
   }
-  if (respuesta.status !== 200) {
-    const mensajes = {
-      401: 'Usuario o contraseña no válidos.',
-      403: 'Acceso no permitido.',
-      503: 'El inicio de sesión no está disponible.',
-      504: 'El servicio de acceso no respondió a tiempo.',
-    };
-    throw new Error(`HTTP ${respuesta.status}: ${mensajes[respuesta.status] || 'No se pudo completar el acceso.'}`);
-  }
-  const datos = await respuesta.json().catch(() => null);
-  if (typeof datos?.access_token !== 'string'
-      || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(datos.access_token)
-      || !Number.isInteger(datos.expires_in) || datos.expires_in <= 0
-      || datos.expires_in > 2147483) {
-    throw new Error('El servidor devolvió una respuesta de acceso inválida.');
-  }
-  return { jwt: datos.access_token, segundos: datos.expires_in };
 }
 
 export async function listarVehiculos(entradaToken, ejecutarFetch = fetch, signal) {
