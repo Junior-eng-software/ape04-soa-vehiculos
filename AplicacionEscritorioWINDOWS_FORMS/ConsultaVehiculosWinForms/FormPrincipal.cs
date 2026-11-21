@@ -1,299 +1,388 @@
+using System.Collections;
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace ConsultaVehiculosWinForms;
 
 public partial class FormPrincipal : Form
 {
-    private readonly VehiculosApiClient apiVehiculos = new();
-    private readonly CompradoresApiClient apiCompradores = new();
-    private readonly VentasApiClient apiVentas = new();
+    private readonly IdentidadApiClient apiIdentidad;
+    private readonly VehiculosApiClient apiVehiculos;
+    private readonly CompradoresApiClient apiCompradores;
+    private readonly System.Windows.Forms.Timer esperaIdentidad = new() { Interval = 500 };
+    private readonly Vista[] vistas;
+    private Vista Vehiculos => vistas[0];
+    private Vista Compradores => vistas[1];
+    private Vista? Activa => pestanasCatalogo.SelectedIndex < 0 ? null : vistas[pestanasCatalogo.SelectedIndex];
+    private CancellationTokenSource? consultaIdentidad;
+    private IdentidadSesion? identidad;
+    private string tokenEscrito = "";
+    private HttpStatusCode? codigoSesion;
+    private int versionSesion;
+    private bool cerrado;
 
-    public FormPrincipal()
+    private static readonly CultureInfo Ecuador = CultureInfo.GetCultureInfo("es-EC");
+
+    public FormPrincipal() : this(GatewayHttp.Cliente) { }
+
+    internal FormPrincipal(HttpClient cliente)
     {
+        apiIdentidad = new(cliente);
+        apiVehiculos = new(cliente);
+        apiCompradores = new(cliente);
+        var apiVentas = new VentasApiClient(cliente);
         InitializeComponent();
-        txtToken.TextChanged += (_, _) =>
+
+        vistas =
+        [
+            new(dgvVehiculos, btnConsultar, async token => await apiVehiculos.ConsultarAsync(token)),
+            new(dgvCompradores, btnConsultarCompradores, async token => await apiCompradores.ConsultarAsync(token)),
+            new(dgvVentas, btnConsultarVentas, async token => await apiVentas.ConsultarAsync(token))
+        ];
+        txtToken.TextChanged += CambiarToken;
+        txtToken.KeyDown += VerificarConEnter;
+        esperaIdentidad.Tick += async (_, _) => await VerificarIdentidadAsync();
+        pestanasCatalogo.SelectedIndexChanged += async (_, _) =>
         {
-            dgvCompradores.DataSource = null;
-            dgvVentas.DataSource = null;
+            MostrarVistaActiva();
+            await CargarVistaActivaAsync();
         };
+        foreach (Vista vista in vistas)
+            vista.Actualizar.Click += async (_, _) => await CargarAsync(vista);
+        ConfigurarRegistro();
+        ActualizarAcciones();
     }
 
-    private string ObtenerToken()
+    private void CambiarToken(object? sender, EventArgs e)
     {
         string token = txtToken.Text.Trim();
         if (token.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-        {
             token = token[7..].Trim();
-        }
-
-        if (token.Length == 0)
-        {
-            MostrarEstado("Pegue primero el token JWT obtenido en Postman.", esError: true);
-            txtToken.Focus();
-        }
-        return token;
-    }
-
-    private async void btnConsultar_Click(object? sender, EventArgs e)
-    {
-        string token = ObtenerToken();
-        if (token.Length == 0)
+        if (token == tokenEscrito)
             return;
 
-        pestanasCatalogo.SelectedIndex = 0;
-        HabilitarAcciones(false);
-        MostrarEstado("Consultando API Java...");
+        tokenEscrito = token;
+        esperaIdentidad.Stop();
+        consultaIdentidad?.Cancel();
+        InvalidarSesion(token.Length == 0 ? "Sin sesión" : "Verificando sesión…");
+        if (token.Length > 0)
+            esperaIdentidad.Start();
+    }
 
+    private async void VerificarConEnter(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode != Keys.Enter)
+            return;
+        e.SuppressKeyPress = true;
+        await VerificarIdentidadAsync();
+    }
+
+    private async Task VerificarIdentidadAsync()
+    {
+        esperaIdentidad.Stop();
+        if (cerrado || tokenEscrito.Length == 0 || identidad is not null || codigoSesion == HttpStatusCode.Unauthorized ||
+            consultaIdentidad is { IsCancellationRequested: false })
+            return;
+
+        int version = versionSesion;
+        using var solicitud = new CancellationTokenSource();
+        consultaIdentidad = solicitud;
+        MostrarSesion("Verificando sesión…");
         try
         {
-            int total = await CargarCatalogoAsync(token);
-            MostrarEstado(total == 0
-                ? "HTTP 200: la API respondió, pero no hay vehículos registrados."
-                : "HTTP 200: consulta realizada correctamente.");
+            IdentidadSesion actual = await apiIdentidad.ConsultarAsync(tokenEscrito, solicitud.Token);
+            if (!EsVersionActual(version))
+                return;
+
+            identidad = actual;
+            string roles = string.Join(", ", actual.Roles.Select(rol =>
+                rol.StartsWith("ROLE_", StringComparison.Ordinal) ? rol[5..] : rol));
+            MostrarSesion($"{actual.Usuario} · {roles} · Sesión verificada");
+            await CargarVistaActivaAsync();
         }
-        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode codigo)
+        catch (Exception ex) when (EsFalloHttp(ex))
         {
-            LimpiarDatos();
-            MostrarEstado(codigo switch
+            if (EsVersionActual(version))
             {
-                HttpStatusCode.Unauthorized => "HTTP 401: JWT inválido o vencido. Genere un token nuevo.",
-                HttpStatusCode.Forbidden => "HTTP 403: el usuario no tiene permiso de consulta.",
-                _ => $"Error HTTP {(int)codigo} al consultar Java."
-            }, esError: true);
-        }
-        catch (HttpRequestException)
-        {
-            LimpiarDatos();
-            MostrarEstado("No se pudo conectar. Compruebe NGINX en localhost:8090.", esError: true);
-        }
-        catch (TaskCanceledException)
-        {
-            LimpiarDatos();
-            MostrarEstado("La API no respondió dentro de los 15 segundos.", esError: true);
-        }
-        catch (JsonException)
-        {
-            LimpiarDatos();
-            MostrarEstado("La respuesta no tiene el JSON esperado de vehículos.", esError: true);
+                var codigo = (ex as HttpRequestException)?.StatusCode;
+                MostrarSesion(MensajeError(ex, "No se pudo verificar la sesión."), codigo, error: true);
+            }
         }
         finally
         {
-            HabilitarAcciones(true);
+            if (ReferenceEquals(consultaIdentidad, solicitud))
+                consultaIdentidad = null;
+        }
+    }
+
+    private void InvalidarSesion(string mensaje, HttpStatusCode? codigo = null)
+    {
+        versionSesion++;
+        identidad = null;
+        ActualizarCatalogoRegistro(null);
+        foreach (Vista vista in vistas)
+        {
+            vista.Grilla.DataSource = null;
+            vista.Consultada = false;
+            vista.Total = null;
+            vista.UltimaActualizacion = null;
+            vista.Mensaje = "Introduce un JWT válido para consultar.";
+            vista.Codigo = null;
+            vista.Error = false;
+        }
+        MostrarSesion(mensaje, codigo, error: codigo is not null);
+    }
+
+    private void MostrarSesion(string mensaje, HttpStatusCode? codigo = null, bool error = false)
+    {
+        codigoSesion = codigo;
+        lblSesion.Text = mensaje;
+        lblSesion.ForeColor = error ? Color.Firebrick : TextoSecundario;
+        ActualizarAcciones();
+        MostrarVistaActiva();
+    }
+
+    private Task CargarVistaActivaAsync() =>
+        Activa is { Consultada: false } vista ? CargarAsync(vista) : Task.CompletedTask;
+
+    private async Task CargarAsync(Vista vista, string? confirmacion = null)
+    {
+        if (identidad is null || vista.Cargando || (vista.Registrando && confirmacion is null))
+            return;
+
+        int version = versionSesion;
+        vista.Consultada = true;
+        vista.Cargando = true;
+        Informar(vista, confirmacion is null ? "Cargando registros…" : $"{confirmacion} Actualizando listado…",
+            confirmacion is null ? null : HttpStatusCode.Created);
+
+        try
+        {
+            IList registros = await vista.Consultar(tokenEscrito);
+            if (!EsVersionActual(version))
+                return;
+
+            vista.Grilla.DataSource = registros;
+            if (vista == Vehiculos)
+                ActualizarCatalogoRegistro((IReadOnlyList<Vehiculo>)registros);
+            vista.Total = registros.Count;
+            vista.UltimaActualizacion = DateTime.Now;
+            Informar(vista, confirmacion ?? (registros.Count == 0 ? "No hay registros disponibles." : "Listado actualizado."),
+                confirmacion is null ? HttpStatusCode.OK : HttpStatusCode.Created);
+        }
+        catch (Exception ex) when (EsFalloHttp(ex))
+        {
+            if (EsVersionActual(version))
+            {
+                var codigo = (ex as HttpRequestException)?.StatusCode;
+                if (codigo == HttpStatusCode.Unauthorized)
+                    InvalidarSesion(confirmacion is null ? "JWT inválido o vencido." : $"{confirmacion} La sesión venció.", codigo);
+                else
+                {
+                    if (codigo == HttpStatusCode.Forbidden)
+                    {
+                        vista.Grilla.DataSource = null;
+                        if (vista == Vehiculos)
+                            ActualizarCatalogoRegistro(null);
+                        vista.Total = null;
+                        vista.UltimaActualizacion = null;
+                    }
+                    string mensaje = MensajeError(ex, "No se pudo actualizar el listado.");
+                    Informar(vista, confirmacion is null ? mensaje : $"{confirmacion} {mensaje}", codigo, error: true);
+                }
+            }
+        }
+        finally
+        {
+            vista.Cargando = false;
+            await AlTerminarAsync(vista, version);
         }
     }
 
     private async void btnRegistrar_Click(object? sender, EventArgs e)
     {
-        string token = ObtenerToken();
-        if (token.Length == 0)
+        if (!PuedeRegistrar(Vehiculos))
+            return;
+        ConfirmarMarca(cmbMarca.Text);
+        if (!ValidarFormulario(Vehiculos, camposVehiculo))
             return;
 
-        string marca = txtMarca.Text.Trim(), modelo = txtModelo.Text.Trim(), placa = txtPlaca.Text.Trim();
-        string chasis = txtChasis.Text.Trim(), color = txtColor.Text.Trim();
-        if (marca.Length == 0 || modelo.Length == 0 || placa.Length == 0 || chasis.Length != 17)
-        {
-            MostrarEstado("Ingresa marca, modelo, placa y un chasis de 17 caracteres.", esError: true);
-            return;
-        }
-        if (!int.TryParse(txtAnio.Text, out int anio))
-        {
-            MostrarEstado("Ingresa el año como número entero.", esError: true);
-            return;
-        }
-        if (!decimal.TryParse(txtPrecio.Text.Trim(), NumberStyles.AllowDecimalPoint,
-                CultureInfo.CurrentCulture, out decimal precio)
-            || precio <= 0 || precio > 9999999999.99m || decimal.Round(precio, 2) != precio)
-        {
-            MostrarEstado("Ingresa un precio positivo de hasta 10 enteros y 2 decimales.", esError: true);
-            return;
-        }
-
-        var datos = new CrearVehiculoRequest(marca, modelo, placa, chasis, anio,
-            color.Length == 0 ? null : color, decimal.Round(precio, 2));
-        HabilitarAcciones(false);
-        MostrarEstado("Registrando vehículo...");
-
-        try
-        {
-            int id = await apiVehiculos.CrearAsync(token, datos);
-            string confirmado = $"HTTP 201: vehículo registrado con ID {id}.";
-            foreach (TextBox campo in new[] { txtMarca, txtModelo, txtPlaca, txtChasis, txtAnio, txtColor, txtPrecio })
-                campo.Clear();
-
-            try
-            {
-                await CargarCatalogoAsync(token);
-                MostrarEstado(confirmado);
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
-            {
-                MostrarEstado($"{confirmado} No se pudo actualizar el catálogo.", esError: true);
-            }
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode codigo)
-        {
-            string mensaje = codigo switch
-            {
-                HttpStatusCode.BadRequest => "Solicitud inválida. Revisa los datos ingresados.",
-                HttpStatusCode.Unauthorized => "JWT inválido o vencido. Genere un token nuevo.",
-                HttpStatusCode.Forbidden => "El usuario no tiene permiso para registrar vehículos.",
-                HttpStatusCode.Conflict => "Los datos entran en conflicto con un vehículo existente.",
-                HttpStatusCode.UnprocessableEntity => "Uno o más datos no cumplen la validación de la API.",
-                HttpStatusCode.Created => "La respuesta no contiene un ID válido. Consulta el catálogo antes de reintentar.",
-                _ => "Respuesta inesperada. Consulta el catálogo antes de reintentar."
-            };
-            MostrarEstado($"HTTP {(int)codigo}: {mensaje}", esError: true);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            string mensaje = ex is TaskCanceledException ? "Se agotó el tiempo de espera." : "Se interrumpió la conexión con NGINX.";
-            MostrarEstado($"{mensaje} Consulta el catálogo antes de reintentar.", esError: true);
-        }
-        finally
-        {
-            HabilitarAcciones(true);
-        }
+        int anio = int.Parse(txtAnio.Text.Trim(), CultureInfo.InvariantCulture);
+        LeerPrecio(txtPrecio.Text.Trim(), out decimal precio);
+        string color = txtColor.Text.Trim();
+        var datos = new CrearVehiculoRequest(cmbMarca.Text, cmbModelo.Text, txtPlaca.Text.Trim(), txtChasis.Text.Trim(),
+            anio, color.Length == 0 ? null : color, precio);
+        await RegistrarAsync(Vehiculos, token => apiVehiculos.CrearAsync(token, datos), "vehículo", camposVehiculo);
     }
 
     private async void btnRegistrarComprador_Click(object? sender, EventArgs e)
     {
-        string token = ObtenerToken();
-        if (token.Length == 0)
+        if (!PuedeRegistrar(Compradores) || !ValidarFormulario(Compradores, camposComprador))
             return;
 
-        string documento = txtDocumentoComprador.Text.Trim();
-        string nombre = txtNombreComprador.Text.Trim();
-        string correo = txtCorreoComprador.Text.Trim();
-        if (documento.Length < 3 || nombre.Length < 2
-            || correo.Length < 5 || !Regex.IsMatch(correo, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
-        {
-            MostrarEstado("Ingresa un documento de al menos 3 caracteres, un nombre y un correo válido.", esError: true);
-            return;
-        }
+        var datos = new CrearCompradorRequest(txtDocumentoComprador.Text.Trim(), txtNombreComprador.Text.Trim(),
+            txtCorreoComprador.Text.Trim());
+        await RegistrarAsync(Compradores, token => apiCompradores.CrearAsync(token, datos), "comprador", camposComprador);
+    }
 
-        HabilitarAcciones(false);
-        MostrarEstado("Registrando comprador...");
+    private async Task RegistrarAsync(Vista vista, Func<string, Task<int>> crear, string recurso, Control[] campos)
+    {
+        int version = versionSesion;
+        vista.Registrando = true;
+        foreach (Control campo in campos)
+            campo.Enabled = false;
+        Informar(vista, $"Registrando {recurso}…");
+
         try
         {
-            var datos = new CrearCompradorRequest(documento, nombre, correo);
-            int id = await apiCompradores.CrearAsync(token, datos);
-            txtDocumentoComprador.Clear();
-            txtNombreComprador.Clear();
-            txtCorreoComprador.Clear();
-            MostrarEstado($"HTTP 201: comprador registrado con ID {id}.");
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode codigo)
-        {
-            string mensaje = codigo switch
+            int id = await crear(tokenEscrito);
+            if (!cerrado)
             {
-                HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity => "Revisa el documento, el nombre y el correo.",
-                HttpStatusCode.Unauthorized => "JWT inválido o vencido. Genere un token nuevo.",
-                HttpStatusCode.Forbidden => "Se requiere el rol OPERADOR o ADMIN para registrar compradores.",
-                HttpStatusCode.Conflict => "El documento ya está registrado para este usuario.",
-                HttpStatusCode.Created => "La API confirmó el alta, pero el ID no está disponible.",
-                _ => "Respuesta inesperada. Verifica el resultado antes de reintentar."
-            };
-            MostrarEstado($"HTTP {(int)codigo}: {mensaje}", esError: true);
+                foreach (Control campo in campos)
+                {
+                    campo.Text = "";
+                    erroresRegistro.SetError(campo, "");
+                }
+                if (vista == Vehiculos)
+                {
+                    marcaConfirmada = "";
+                    ActualizarOpciones(cmbModelo, []);
+                }
+            }
+            if (EsVersionActual(version))
+                await CargarAsync(vista, $"Se registró el {recurso} con ID {id}.");
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (EsFalloHttp(ex))
         {
-            string mensaje = ex is TaskCanceledException ? "Se agotó el tiempo de espera." : "Se interrumpió la conexión con NGINX.";
-            MostrarEstado($"{mensaje} Verifica el resultado antes de reintentar.", esError: true);
+            if (EsVersionActual(version))
+            {
+                var codigo = (ex as HttpRequestException)?.StatusCode;
+                if (codigo == HttpStatusCode.Unauthorized)
+                    InvalidarSesion("JWT inválido o vencido. Introduce un token nuevo.", codigo);
+                else
+                {
+                    string mensaje = codigo switch
+                    {
+                        HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity => "Revisa los datos ingresados.",
+                        HttpStatusCode.Conflict => vista == Vehiculos
+                            ? "La placa o el chasis ya está registrado."
+                            : "El documento ya está registrado para este usuario.",
+                        HttpStatusCode.Created => "La API confirmó el alta sin un ID válido. Consulta el listado antes de reintentar.",
+                        HttpStatusCode.Forbidden => "El usuario no tiene permiso de registro.",
+                        _ => MensajeError(ex, "No se pudo confirmar el registro.") + " Consulta el listado antes de reintentar."
+                    };
+                    Informar(vista, mensaje, codigo, error: true);
+                }
+            }
         }
         finally
         {
-            HabilitarAcciones(true);
+            vista.Registrando = false;
+            if (!cerrado)
+                foreach (Control campo in campos)
+                    campo.Enabled = true;
+            await AlTerminarAsync(vista, version);
         }
     }
 
-    private async void btnConsultarCompradores_Click(object? sender, EventArgs e) =>
-        await ConsultarListadoAsync(apiCompradores.ConsultarAsync, dgvCompradores, "compradores");
-
-    private async void btnConsultarVentas_Click(object? sender, EventArgs e) =>
-        await ConsultarListadoAsync(apiVentas.ConsultarAsync, dgvVentas, "ventas");
-
-    private async Task ConsultarListadoAsync<T>(
-        Func<string, Task<List<T>>> consultar, DataGridView grilla, string recurso)
+    private async Task AlTerminarAsync(Vista vista, int version)
     {
-        string token = ObtenerToken();
-        if (token.Length == 0)
+        if (cerrado)
+            return;
+        ActualizarAcciones();
+        if (version != versionSesion && vista == Activa)
+            await CargarVistaActivaAsync();
+    }
+
+    private bool EsVersionActual(int version) => !cerrado && version == versionSesion;
+
+    private void ActualizarAcciones()
+    {
+        foreach (Vista vista in vistas)
+            vista.Actualizar.Enabled = identidad is not null && !vista.Cargando && !vista.Registrando;
+
+        btnRegistrar.Enabled = PuedeRegistrar(Vehiculos);
+        btnRegistrarComprador.Enabled = PuedeRegistrar(Compradores);
+        ActualizarAyudaRegistro();
+    }
+
+    private bool PuedeRegistrar(Vista vista) =>
+        identidad is { PuedeRegistrar: true } && !vista.Cargando && !vista.Registrando;
+
+    private void Informar(Vista vista, string mensaje, HttpStatusCode? codigo = null, bool error = false)
+    {
+        vista.Mensaje = mensaje;
+        vista.Codigo = codigo;
+        vista.Error = error;
+        ActualizarAcciones();
+        MostrarVistaActiva();
+    }
+
+    private void MostrarVistaActiva()
+    {
+        Vista? vista = Activa;
+        if (vista is null)
             return;
 
-        grilla.DataSource = null;
-        HabilitarAcciones(false);
-        txtToken.Enabled = false;
-        MostrarEstado($"Consultando {recurso}...");
-        try
-        {
-            List<T> registros = await consultar(token);
-            grilla.DataSource = registros;
-            MostrarEstado(registros.Count == 0
-                ? $"HTTP 200: no hay {recurso} visibles."
-                : $"HTTP 200: {registros.Count} {recurso} visibles.");
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode codigo)
-        {
-            string mensaje = codigo switch
-            {
-                HttpStatusCode.Unauthorized => "JWT inválido o vencido. Genere un token nuevo.",
-                HttpStatusCode.Forbidden => $"El usuario no tiene permiso para consultar {recurso}.",
-                _ => $"Respuesta inesperada al consultar {recurso}."
-            };
-            MostrarEstado($"HTTP {(int)codigo}: {mensaje}", esError: true);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
-        {
-            string mensaje = ex switch
-            {
-                TaskCanceledException => "La API no respondió dentro de los 15 segundos.",
-                JsonException => $"La respuesta no tiene el JSON esperado de {recurso}.",
-                _ => "No se pudo conectar. Compruebe NGINX en localhost:8090."
-            };
-            MostrarEstado(mensaje, esError: true);
-        }
-        finally
-        {
-            txtToken.Enabled = true;
-            HabilitarAcciones(true);
-        }
+        lblEstado.Text = vista.Mensaje;
+        lblEstado.ForeColor = vista.Error ? Color.Firebrick : TextoSecundario;
+        HttpStatusCode? codigo = vista.Codigo ?? codigoSesion;
+        lblHttp.Text = codigo is null ? "" : $"HTTP {(int)codigo.Value}";
+        lblTotal.Text = vista.Total is int total ? $"Total: {total}" : "Total: —";
+        lblActualizacion.Text = vista.UltimaActualizacion is DateTime fecha
+            ? $"Actualizado: {fecha.ToString("HH:mm:ss", Ecuador)}" : "Actualizado: —";
     }
 
-    private async Task<int> CargarCatalogoAsync(string token)
+    private static bool EsFalloHttp(Exception ex) =>
+        ex is HttpRequestException or OperationCanceledException or JsonException or FormatException;
+
+    private static string MensajeError(Exception ex, string predeterminado) => ex switch
     {
-        List<Vehiculo> lista = await apiVehiculos.ConsultarAsync(token);
-        dgvVehiculos.DataSource = null;
-        dgvVehiculos.DataSource = lista;
-        lblTotal.Text = $"Total de vehículos: {lista.Count}";
-        pestanasCatalogo.SelectedIndex = 0;
-        return lista.Count;
+        HttpRequestException { StatusCode: HttpStatusCode.Unauthorized } => "JWT inválido o vencido. Introduce un token nuevo.",
+        HttpRequestException { StatusCode: HttpStatusCode.Forbidden } => "El usuario no tiene permiso de consulta.",
+        HttpRequestException { StatusCode: null } => "No se pudo conectar con NGINX.",
+        OperationCanceledException => "Se agotó el tiempo de espera.",
+        JsonException => "La API devolvió datos inesperados.",
+        FormatException => "El formato del JWT no es válido.",
+        _ => predeterminado
+    };
+
+    private void FormatearCelda(object? sender, DataGridViewCellFormattingEventArgs e)
+    {
+        var grilla = (DataGridView)sender!;
+        string propiedad = grilla.Columns[e.ColumnIndex].DataPropertyName;
+        if (propiedad == nameof(Vehiculo.Precio) && e.Value is decimal precio)
+            e.Value = FormatearImporte(precio, "USD");
+        else if (propiedad == nameof(VentaResumen.PrecioAcordado) && grilla.Rows[e.RowIndex].DataBoundItem is VentaResumen venta)
+            e.Value = decimal.TryParse(venta.PrecioAcordado, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign,
+                CultureInfo.InvariantCulture, out decimal acordado) ? FormatearImporte(acordado, venta.Moneda) : "—";
+        else if (propiedad == nameof(Vehiculo.Chasis) && e.Value is string { Length: > 12 } chasis)
+            e.Value = $"{chasis[..8]}…{chasis[^3..]}";
+        else
+            return;
+
+        e.FormattingApplied = true;
     }
 
-    private void HabilitarAcciones(bool habilitadas)
+    private static string FormatearImporte(decimal importe, string? moneda)
     {
-        btnConsultar.Enabled = habilitadas;
-        btnRegistrar.Enabled = habilitadas;
-        btnRegistrarComprador.Enabled = habilitadas;
-        btnConsultarCompradores.Enabled = habilitadas;
-        btnConsultarVentas.Enabled = habilitadas;
+        string cantidad = importe.ToString("#,##0.00", Ecuador);
+        return string.IsNullOrWhiteSpace(moneda) ? cantidad : $"{moneda} {cantidad}";
     }
 
-    private void LimpiarDatos()
+    private sealed class Vista(DataGridView grilla, Button actualizar, Func<string, Task<IList>> consultar)
     {
-        dgvVehiculos.DataSource = null;
-        lblTotal.Text = "Total de vehículos: 0";
-    }
-
-    private void MostrarEstado(string mensaje, bool esError = false)
-    {
-        lblEstado.ForeColor = esError ? Color.Firebrick : Color.FromArgb(50, 64, 76);
-        lblEstado.Text = mensaje;
-    }
-
-    private void lblTitulo_Click(object sender, EventArgs e)
-    {
-
+        public DataGridView Grilla { get; } = grilla;
+        public Button Actualizar { get; } = actualizar;
+        public Func<string, Task<IList>> Consultar { get; } = consultar;
+        public bool Cargando { get; set; }
+        public bool Consultada { get; set; }
+        public bool Registrando { get; set; }
+        public string Mensaje { get; set; } = "Introduce un JWT válido para consultar.";
+        public HttpStatusCode? Codigo { get; set; }
+        public bool Error { get; set; }
+        public int? Total { get; set; }
+        public DateTime? UltimaActualizacion { get; set; }
     }
 }
