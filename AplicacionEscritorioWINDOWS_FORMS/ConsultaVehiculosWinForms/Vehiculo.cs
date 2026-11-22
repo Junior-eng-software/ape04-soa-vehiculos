@@ -23,7 +23,7 @@ public sealed class Vehiculo
     public int Anio { get; set; }
 
     [JsonPropertyName("color")]
-    public string Color { get; set; } = "";
+    public string? Color { get; set; }
 
     [JsonPropertyName("precio")]
     public decimal Precio { get; set; }

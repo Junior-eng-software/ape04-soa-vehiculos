@@ -250,32 +250,25 @@ public class VehiculoService {
             );
         }
 
-        // Asigna la marca eliminando espacios de los extremos.
-        v.setMarca(d.marca().trim());
+        String placa = d.placa().toUpperCase(Locale.ROOT);
+        String chasis = d.chasis().toUpperCase(Locale.ROOT);
 
-        // Asigna el modelo eliminando espacios de los extremos.
-        v.setModelo(d.modelo().trim());
-
-        // Convierte la placa a mayúsculas y elimina espacios.
-        v.setPlaca(
-                d.placa().trim().toUpperCase(Locale.ROOT)
-        );
-
-        // Convierte el chasis a mayúsculas y elimina espacios.
-        v.setChasis(
-                d.chasis().trim().toUpperCase(Locale.ROOT)
-        );
-
-        // Comprueba que el chasis tenga exactamente 17 caracteres.
-        if (v.getChasis().length() != 17) {
-
-            // Genera un error si el chasis no cumple la longitud.
+        // Al pasar a mayúsculas, un carácter puede ocupar varios puntos de código.
+        if (placa.codePointCount(0, placa.length()) > 10) {
+            throw new ApiError(422, "PLACA_INVALIDA", "La placa normalizada admite hasta 10 caracteres");
+        }
+        if (chasis.codePointCount(0, chasis.length()) != 17) {
             throw new ApiError(
                     422,
                     "CHASIS_INVALIDO",
-                    "Chasis de 17 caracteres"
+                    "El chasis normalizado debe tener 17 caracteres"
             );
         }
+
+        v.setMarca(d.marca());
+        v.setModelo(d.modelo());
+        v.setPlaca(placa);
+        v.setChasis(chasis);
 
         // Asigna el año del vehículo.
         v.setAnio(d.anio());

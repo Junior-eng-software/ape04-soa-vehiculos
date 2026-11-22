@@ -15,9 +15,15 @@ import org.springframework.http.ResponseEntity;
 
 // Importa las anotaciones REST de Spring Boot.
 import org.springframework.web.bind.annotation.*;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.ObjectReader;
+import tools.jackson.databind.json.JsonMapper;
 
 // Importa los DTO de entrada y salida.
 import ec.edu.uta.venta_vehiculos_api.dto.*;
+import ec.edu.uta.venta_vehiculos_api.exception.ApiError;
 
 // Importa el servicio que contiene las reglas de negocio.
 import ec.edu.uta.venta_vehiculos_api.service.VehiculoService;
@@ -31,6 +37,13 @@ import ec.edu.uta.venta_vehiculos_api.client.NotificacionClient;
 // Define la ruta principal para administrar vehículos.
 @RequestMapping("/api/vehiculos")
 public class VehiculoController {
+
+    // Solo PATCH necesita leer un objeto libre sin convertir sus decimales a double.
+    private static final ObjectReader LECTOR_PATCH = JsonMapper.builder()
+            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .build()
+            .readerFor(new TypeReference<Map<String, Object>>() {});
 
     // Servicio encargado de las operaciones de vehículos.
     private final VehiculoService service;
@@ -131,10 +144,19 @@ public class VehiculoController {
             @PathVariable int id,
 
             // Recibe el JSON con el nuevo precio.
-            @RequestBody Map<String, Object> d) {
+            @RequestBody String cuerpo) {
 
         // Solicita modificar únicamente el precio.
-        var r = service.precio(id, d);
+        Map<String, Object> datos;
+        try {
+            datos = LECTOR_PATCH.readValue(cuerpo);
+        } catch (JacksonException ex) {
+            throw new ApiError(400, "JSON_INVALIDO", "JSON ilegible o tipo de dato incorrecto");
+        }
+        if (datos == null) {
+            throw new ApiError(400, "JSON_INVALIDO", "Se requiere un objeto JSON");
+        }
+        var r = service.precio(id, datos);
 
         // Solicita una notificación por el cambio de precio.
         avisos.enviar(

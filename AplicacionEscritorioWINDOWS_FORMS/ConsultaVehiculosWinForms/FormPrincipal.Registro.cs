@@ -25,7 +25,7 @@ public partial class FormPrincipal
             [cmbMarca] = valor => ValidarLongitud(valor, 1, 50, "La marca debe tener de 1 a 50 caracteres."),
             [cmbModelo] = valor => ValidarLongitud(valor, 1, 50, "El modelo debe tener de 1 a 50 caracteres."),
             [txtPlaca] = valor => ValidarLongitud(valor, 1, 10, "La placa debe tener de 1 a 10 caracteres."),
-            [txtChasis] = valor => valor.Length == 17 ? "" : "El chasis debe tener exactamente 17 caracteres.",
+            [txtChasis] = valor => ValidarLongitud(valor, 17, 17, "El chasis debe tener exactamente 17 caracteres."),
             [txtAnio] = valor =>
             {
                 int maximo = DateTime.Today.Year + 1;

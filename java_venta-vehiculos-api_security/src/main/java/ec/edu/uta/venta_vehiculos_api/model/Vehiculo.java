@@ -26,21 +26,27 @@ public class Vehiculo {
     private Integer idVehiculo;
 
     // Campo para guardar la marca del vehículo
+    @Column(length = 50, nullable = false)
     private String marca;
 
     // Campo para guardar el modelo del vehículo
+    @Column(length = 50, nullable = false)
     private String modelo;
 
     // Campo para guardar la placa o matrícula del vehículo
+    @Column(length = 10, nullable = false)
     private String placa;
 
     // Campo para guardar el número de chasis del vehículo
+    @Column(length = 17, nullable = false)
     private String chasis;
 
     // Campo para guardar el año de fabricación del vehículo
+    @Column(nullable = false)
     private Integer anio;
 
     // Campo para guardar el color del vehículo
+    @Column(length = 30)
     private String color;
 
     // Campo para guardar el precio del vehículo con precisión decimal
