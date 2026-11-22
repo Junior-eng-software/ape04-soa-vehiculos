@@ -49,7 +49,7 @@ public partial class FormPrincipal : Form
             await CargarVistaActivaAsync();
         };
         foreach (Vista vista in vistas)
-            vista.Actualizar.Click += async (_, _) => await CargarAsync(vista);
+            vista.Actualizar.Click += async (_, _) => await CargarAsync(vista, manual: true);
         ConfigurarRegistro();
         ConfigurarFiltros();
         ActualizarAcciones();
@@ -148,7 +148,7 @@ public partial class FormPrincipal : Form
     private Task CargarVistaActivaAsync() =>
         Activa is { Consultada: false } vista ? CargarAsync(vista) : Task.CompletedTask;
 
-    private async Task CargarAsync(Vista vista, string? confirmacion = null)
+    private async Task CargarAsync(Vista vista, string? confirmacion = null, bool manual = false)
     {
         if (identidad is null || vista.Cargando || (vista.Registrando && confirmacion is null))
             return;
@@ -204,6 +204,12 @@ public partial class FormPrincipal : Form
                     string mensaje = MensajeError(ex, "No se pudo actualizar el listado.");
                     Informar(vista, confirmacion is null ? mensaje : $"{confirmacion} {mensaje}", codigo, error: true);
                 }
+                if (manual && codigo is (HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden))
+                {
+                    if (MostrarDialogo(ErrorRegistro.Desde(ex, vista == Vehiculos))
+                        && !cerrado && codigo == HttpStatusCode.Unauthorized)
+                        txtToken.Select();
+                }
             }
         }
         finally
@@ -242,9 +248,15 @@ public partial class FormPrincipal : Form
     private async Task RegistrarAsync(Vista vista, Func<string, Task<int>> crear, string recurso, Control[] campos)
     {
         int version = versionSesion;
+        Control? foco = null;
+        int versionFoco = version;
         vista.Registrando = true;
         foreach (Control campo in campos)
+        {
+            erroresServidor.Remove(campo);
+            erroresRegistro.SetError(campo, "");
             campo.Enabled = false;
+        }
         Informar(vista, $"Registrando {recurso}…");
 
         try
@@ -271,22 +283,25 @@ public partial class FormPrincipal : Form
             if (EsVersionActual(version))
             {
                 var codigo = (ex as HttpRequestException)?.StatusCode;
+                var error = ErrorRegistro.Desde(ex, vista == Vehiculos);
                 if (codigo == HttpStatusCode.Unauthorized)
                     InvalidarSesion("JWT inválido o vencido. Introduce un token nuevo.", codigo);
-                else
+                Informar(vista, error.Mensaje, codigo, error: true);
+                Control? campo = error.Campo switch
                 {
-                    string mensaje = codigo switch
-                    {
-                        HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity => "Revisa los datos ingresados.",
-                        HttpStatusCode.Conflict => vista == Vehiculos
-                            ? "La placa o el chasis ya está registrado."
-                            : "El documento ya está registrado para este usuario.",
-                        HttpStatusCode.Created => "La API confirmó el alta sin un ID válido. Consulta el listado antes de reintentar.",
-                        HttpStatusCode.Forbidden => "El usuario no tiene permiso de registro.",
-                        _ => MensajeError(ex, "No se pudo confirmar el registro.") + " Consulta el listado antes de reintentar."
-                    };
-                    Informar(vista, mensaje, codigo, error: true);
+                    CampoCorreccion.Correo => txtCorreoComprador,
+                    CampoCorreccion.Documento => txtDocumentoComprador,
+                    CampoCorreccion.Token => txtToken,
+                    _ => null
+                };
+                if (campo is not null && campo != txtToken)
+                {
+                    erroresServidor[campo] = error.Titulo;
+                    erroresRegistro.SetError(campo, error.Titulo);
                 }
+                versionFoco = versionSesion;
+                if (MostrarDialogo(error))
+                    foco = campo;
             }
         }
         finally
@@ -295,6 +310,14 @@ public partial class FormPrincipal : Form
             if (!cerrado)
                 foreach (Control campo in campos)
                     campo.Enabled = true;
+            if (foco is not null && EsVersionActual(versionFoco))
+            {
+                if (foco != txtToken)
+                    pestanasCatalogo.SelectedIndex = Array.IndexOf(vistas, vista);
+                foco.Select();
+                if (foco is TextBox entrada && entrada != txtToken)
+                    entrada.SelectAll();
+            }
             await AlTerminarAsync(vista, version);
         }
     }

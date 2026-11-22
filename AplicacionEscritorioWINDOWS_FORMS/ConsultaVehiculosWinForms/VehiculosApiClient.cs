@@ -38,6 +38,8 @@ internal sealed class VehiculosApiClient(HttpClient clienteHttp)
         solicitud.Content = JsonContent.Create(datos);
 
         using HttpResponseMessage respuesta = await clienteHttp.SendAsync(solicitud).ConfigureAwait(false);
+        if (respuesta.StatusCode == HttpStatusCode.Conflict)
+            throw await ConflictoRegistroException.DesdeRespuestaAsync(respuesta).ConfigureAwait(false);
         respuesta.EnsureSuccessStatusCode();
         if (respuesta.StatusCode != HttpStatusCode.Created)
             throw new HttpRequestException("HTTP inesperado al registrar.", null, respuesta.StatusCode);

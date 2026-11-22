@@ -92,6 +92,59 @@ def sistema(monkeypatch):
     return TestClient(app),estado
 
 
+@pytest.mark.parametrize(('correo', 'token'), [
+    ('comprador@example.test', 'valido'),
+    ('COMPRADOR@EXAMPLE.TEST', 'valido'),
+    ('  comprador@example.test  ', 'valido'),
+    ('comprador@example.test', 'admin'),
+])
+def test_correo_duplicado_global(sistema, correo, token):
+    cliente, _ = sistema
+    original = {'documento': 'DOC-001', 'nombre': 'Comprador de prueba',
+                'correo': '  Comprador@Example.Test  '}
+    alta = cliente.post('/api/compradores', json=original, headers={'Authorization': 'Bearer valido'})
+    assert alta.status_code == 201
+    assert alta.json()['correo'] == 'comprador@example.test'
+
+    conflicto = cliente.post('/api/compradores', json={**original, 'documento': 'DOC-002', 'correo': correo},
+                             headers={'Authorization': f'Bearer {token}'})
+    assert conflicto.status_code == 409
+    assert conflicto.json()['codigo'] == 'CORREO_DUPLICADO'
+    assert 'comprador@example.test' not in conflicto.text
+    listado = cliente.get('/api/compradores', headers={'Authorization': 'Bearer admin'})
+    assert [c['id'] for c in listado.json()] == [alta.json()['id']]
+
+
+def test_documento_duplicado_revierte_alta(sistema):
+    cliente, _ = sistema
+    operador = {'Authorization': 'Bearer valido'}
+    admin = {'Authorization': 'Bearer admin'}
+    datos = {'documento': 'DOC-001', 'nombre': 'Comprador de prueba', 'correo': 'primero@example.test'}
+    assert cliente.post('/api/compradores', json=datos, headers=operador).status_code == 201
+
+    datos['correo'] = 'segundo@example.test'
+    conflicto = cliente.post('/api/compradores', json=datos, headers=operador)
+    assert conflicto.status_code == 409
+    assert conflicto.json()['codigo'] == 'DOCUMENTO_DUPLICADO'
+    assert len(cliente.get('/api/compradores', headers=admin).json()) == 1
+
+    # El rollback libera el correo del intento rechazado y la unicidad del documento sigue por propietario.
+    assert cliente.post('/api/compradores', json=datos, headers=admin).status_code == 201
+    assert len(cliente.get('/api/compradores', headers=admin).json()) == 2
+
+
+@pytest.mark.parametrize(('token', 'correo', 'status'), [
+    ('valido', 'formato-invalido', 422),
+    ('consulta', 'comprador@example.test', 403),
+    ('no-valido', 'comprador@example.test', 401),
+])
+def test_alta_comprador_rechazada_sin_insertar(sistema, token, correo, status):
+    cliente, _ = sistema
+    datos = {'documento': 'DOC-001', 'nombre': 'Comprador de prueba', 'correo': correo}
+    assert cliente.post('/api/compradores', json=datos, headers={'Authorization': f'Bearer {token}'}).status_code == status
+    assert cliente.get('/api/compradores', headers={'Authorization': 'Bearer admin'}).json() == []
+
+
 @pytest.mark.parametrize('token', ['valido', 'admin'])
 def test_venta_con_jwt_e_idempotencia(sistema, token):
     client,estado=sistema

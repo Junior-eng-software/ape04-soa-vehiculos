@@ -1,6 +1,7 @@
 """Tratamiento centralizado de errores HTTP y errores del dominio."""
 # Registra errores de la aplicación.
 import logging
+import re
 # Genera identificadores únicos.
 from uuid import uuid4
 # Publica endpoints web y valida solicitudes.
@@ -19,6 +20,28 @@ class ApiError(Exception):
     def __init__(self, status, codigo, detalle):
         # Conserva los valores para convertirlos después a JSON.
         self.status, self.codigo, self.detalle = status, codigo, detalle
+
+
+def conflicto_comprador(restriccion):
+    if restriccion == "uq_comprador_correo_normalizado":
+        return ApiError(409, "CORREO_DUPLICADO", "El correo ya está registrado")
+    if restriccion == "uq_comprador_usuario_documento":
+        return ApiError(409, "DOCUMENTO_DUPLICADO", "El documento ya está registrado para este usuario")
+    return ApiError(409, "CONFLICTO_DATOS", "Conflicto al registrar el comprador")
+
+
+def restriccion_duplicada(error):
+    original = error.orig
+    if len(original.args) == 2 and original.args[0] == 1062:
+        # PyMySQL entrega el nombre de la clave al final, a veces calificado por tabla.
+        clave = re.search(r"""['`](?:[^'`]+\.)?(\w+)['`]$""", original.args[1])
+        return clave.group(1) if clave else None
+    if getattr(original, "sqlite_errorname", None) == "SQLITE_CONSTRAINT_UNIQUE":
+        return {
+            "UNIQUE constraint failed: compradores.correo_normalizado": "uq_comprador_correo_normalizado",
+            "UNIQUE constraint failed: compradores.usuario, compradores.documento": "uq_comprador_usuario_documento",
+        }.get(str(original))
+    return None
 
 
 # Construye un formato coherente para todos los errores HTTP.

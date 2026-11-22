@@ -3,14 +3,15 @@
 from typing import Annotated
 # Publica endpoints web y valida solicitudes.
 from fastapi import APIRouter, Depends, Header, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 # Importa el componente local correspondiente a esta responsabilidad.
 from app.db import SessionLocal
 from app.models import Venta, Comprador
 from app.repositories.venta_repository import VentaRepository
 from app.schemas import CompradorResumen, CrearVenta, CrearComprador, VentaResumen
 from app.security import autorizar_venta, filtrar_visibles, identidad, propietario, vendedor
-from app.errors import ApiError
+from app.errors import ApiError, conflicto_comprador, restriccion_duplicada
 from app.services import venta_service as service
 # Crea el agrupador de rutas HTTP con prefijo /api.
 router = APIRouter(prefix="/api")
@@ -20,16 +21,24 @@ router = APIRouter(prefix="/api")
 @router.post("/compradores", status_code=201)
 # Recibe JSON validado y usuario autenticado por Java.
 def crear_comprador(d: CrearComprador, u=Depends(identidad)):
-    # Comprueba permisos de OPERADOR o ADMIN.
     vendedor(u)
-    # Abre una transacción que confirma automáticamente al concluir.
-    with SessionLocal.begin() as db:
-        # Crea el comprador y guarda el propietario real autenticado.
-        c = Comprador(usuario=u["usuario"], **d.model_dump())
-        # Registra la entidad y ejecuta el INSERT para obtener el ID.
-        db.add(c); db.flush()
-        # Envía al cliente el nuevo comprador sin exponer campos internos.
-        return {"id": c.id, "nombre": c.nombre, "correo": c.correo}
+    try:
+        with SessionLocal.begin() as db:
+            # Pydantic ya recortó el correo. Usar LOWER del motor alinea el alta con el índice.
+            correo = db.scalar(select(func.lower(d.correo)))
+            existente = db.scalar(select(Comprador.id).where(Comprador.correo_normalizado == correo))
+            if existente is not None:
+                raise conflicto_comprador("uq_comprador_correo_normalizado")
+
+            comprador = Comprador(
+                usuario=u["usuario"], documento=d.documento, nombre=d.nombre, correo=correo
+            )
+            db.add(comprador)
+            db.flush()
+            return {"id": comprador.id, "nombre": comprador.nombre, "correo": comprador.correo}
+    except IntegrityError as error:
+        # Al salir de la transacción, SQLAlchemy ya ejecutó rollback.
+        raise conflicto_comprador(restriccion_duplicada(error)) from None
 
 
 @router.get("/compradores", response_model=list[CompradorResumen])

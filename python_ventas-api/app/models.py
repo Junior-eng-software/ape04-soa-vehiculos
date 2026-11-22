@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 # Evita errores de redondeo en importes.
 from decimal import Decimal
 # Ofrece ORM, consultas y transacciones SQL.
-from sqlalchemy import String, Numeric, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import Computed, String, Numeric, ForeignKey, Index, UniqueConstraint
+from sqlalchemy.dialects.mysql import VARCHAR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 # Importa el componente local correspondiente a esta responsabilidad.
 from app.db import Base
@@ -23,6 +24,7 @@ class Comprador(Base):
         UniqueConstraint("usuario", "documento",
                          # Asigna o configura el valor de esta instrucción.
                          name="uq_comprador_usuario_documento"),
+        UniqueConstraint("correo_normalizado", name="uq_comprador_correo_normalizado"),
     )
     # Identificador autogenerado de la fila.
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -34,6 +36,12 @@ class Comprador(Base):
     nombre: Mapped[str] = mapped_column(String(120))
     # Correo donde se referencia la notificación de venta.
     correo: Mapped[str] = mapped_column(String(200))
+    correo_normalizado: Mapped[str | None] = mapped_column(
+        String(200).with_variant(
+            VARCHAR(200, charset="utf8mb4", collation="utf8mb4_bin"), "mysql", "mariadb"
+        ),
+        Computed("LOWER(TRIM(correo))", persisted=True),
+    )
     # Relación ORM para navegar de un comprador a sus ventas.
     ventas: Mapped[list["Venta"]] = relationship(
         # Asigna o configura el valor de esta instrucción.

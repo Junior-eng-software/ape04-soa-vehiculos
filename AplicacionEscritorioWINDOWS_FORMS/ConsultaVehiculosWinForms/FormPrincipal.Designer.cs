@@ -213,6 +213,8 @@ partial class FormPrincipal
         txtAnio = AgregarCampo(camposVehiculo, "Año", 0, 2);
         txtColor = AgregarCampo(camposVehiculo, "Color (opcional)", 1, 2);
         txtPrecio = AgregarCampo(camposVehiculo, "Precio (USD, sin miles)", 2, 2);
+        var formatos = new ToolTip(components!);
+        formatos.SetToolTip(txtPrecio, "Usa coma o punto decimal. Ejemplo: 12500,50. No uses separadores de miles.");
 
         var camposComprador = CrearPanelCampos(3, 2);
         txtDocumentoComprador = AgregarCampo(camposComprador, "Documento", 0, 0);
@@ -292,6 +294,7 @@ partial class FormPrincipal
     {
         var etiqueta = new Label { Text = titulo, AutoSize = true, Margin = new Padding(0, 2, 8, 2) };
         entrada.AccessibleName = titulo;
+        entrada.TabIndex = fila * panel.ColumnCount + columna;
         entrada.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         entrada.Margin = new Padding(0, 0, 24, 8);
         panel.Controls.Add(etiqueta, columna, fila);

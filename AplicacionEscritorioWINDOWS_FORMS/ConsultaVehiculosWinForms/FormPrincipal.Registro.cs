@@ -10,6 +10,7 @@ public partial class FormPrincipal
     private static readonly Regex FormatoPrecio = new(@"\A[0-9]{1,10}(?:[,.][0-9]{1,2})?\z");
     private static readonly Regex FormatoCorreo = new(@"\A[^@\s]+@[^@\s]+\.[^@\s]+\z");
     private Dictionary<Control, Func<string, string>> reglasRegistro = null!;
+    private readonly Dictionary<Control, string> erroresServidor = new();
     private Control[] camposVehiculo = null!;
     private Control[] camposComprador = null!;
     private IReadOnlyList<Vehiculo>? catalogoRegistro;
@@ -41,7 +42,14 @@ public partial class FormPrincipal
         };
 
         foreach (Control campo in reglasRegistro.Keys)
+        {
             campo.Validating += (_, _) => ValidarCampo(campo);
+            campo.TextChanged += (_, _) =>
+            {
+                if (erroresServidor.Remove(campo) || erroresRegistro.GetError(campo).Length != 0)
+                    ValidarCampo(campo);
+            };
+        }
 
         cmbMarca.Leave += (_, _) => ConfirmarMarca(cmbMarca.Text);
         cmbMarca.SelectionChangeCommitted += (_, _) => ConfirmarMarca((string?)cmbMarca.SelectedItem ?? cmbMarca.Text);
@@ -75,7 +83,7 @@ public partial class FormPrincipal
     private bool ValidarCampo(Control campo)
     {
         string error = reglasRegistro[campo](campo.Text.Trim());
-        erroresRegistro.SetError(campo, error);
+        erroresRegistro.SetError(campo, error.Length > 0 ? error : erroresServidor.GetValueOrDefault(campo, ""));
         return error.Length == 0;
     }
 
