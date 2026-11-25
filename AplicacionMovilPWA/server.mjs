@@ -174,19 +174,26 @@ export function crearServidor({
         }
       }
       const venta = url.pathname === '/api/ventas' && peticion.method === 'POST';
+      const listadoVentas = url.pathname === '/api/ventas' && peticion.method === 'GET';
       const listado = ['/api/vehiculos', '/api/compradores'].includes(url.pathname) && peticion.method === 'GET';
-      const detalle = peticion.method === 'GET' && /^\/api\/ventas\/([^/]+)$/.exec(url.pathname);
+      const detalle = ['GET', 'DELETE'].includes(peticion.method) && /^\/api\/ventas\/([^/]+)$/.exec(url.pathname);
+      const anulacion = detalle && peticion.method === 'DELETE';
       if (detalle && (!/^[1-9]\d*$/.test(detalle[1]) || !Number.isSafeInteger(Number(detalle[1])))) {
         return responderJson(respuesta, 400, { error: 'El ID de venta debe ser un entero positivo válido.' });
       }
-      if (!nuevaRuta && !venta && !listado && !detalle) {
+      if (!nuevaRuta && !venta && !listadoVentas && !listado && !detalle) {
         return responderJson(respuesta, 404, { error: 'Endpoint no disponible.' });
       }
-      if (venta && !origenLocalPermitido(peticion)) {
+      if ((venta || anulacion) && !origenLocalPermitido(peticion)) {
         return responderJson(respuesta, 403, { error: 'Origen no autorizado.' });
       }
+      if (anulacion && (Number(peticion.headers['content-length']) > 0 || peticion.headers['transfer-encoding'])) {
+        return responderJson(respuesta, 400, { error: 'La anulación no admite un cuerpo.' });
+      }
+      const incluirAnuladas = listadoVentas ? url.searchParams.get('incluirAnuladas') : null;
+      const consulta = incluirAnuladas === null ? '' : '?' + new URLSearchParams({ incluirAnuladas });
       // NGINX admite hasta 30 s de lectura para FastAPI.
-      const signal = AbortSignal.timeout(venta ? 35000 : 12000);
+      const signal = AbortSignal.timeout(venta || anulacion ? 35000 : 12000);
       try {
         const encabezados = new Headers({ Accept: 'application/json' });
         if (peticion.headers.authorization) encabezados.set('Authorization', peticion.headers.authorization);
@@ -195,13 +202,13 @@ export function crearServidor({
           if (peticion.headers['content-type']) encabezados.set('Content-Type', peticion.headers['content-type']);
           if (peticion.headers['idempotency-key']) encabezados.set('Idempotency-Key', peticion.headers['idempotency-key']);
         }
-        const remoto = await fetch(destino + url.pathname, {
+        const remoto = await fetch(destino + url.pathname + consulta, {
           method: peticion.method, headers: encabezados, signal, cache: 'no-store', redirect: 'manual',
           ...(cuerpo && { body: cuerpo }),
           ...(venta && { body: Readable.toWeb(peticion), duplex: 'half' }),
         });
         const datos = Buffer.from(await remoto.arrayBuffer());
-        const ubicacion = venta ? remoto.headers.get('location') : null;
+        const ubicacion = venta || anulacion ? remoto.headers.get('location') : null;
         respuesta.writeHead(remoto.status, {
           'Content-Type': remoto.headers.get('content-type') || 'application/json; charset=utf-8',
           'Cache-Control': 'no-store', 'Vary': 'Authorization',

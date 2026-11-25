@@ -39,6 +39,13 @@ button { border-radius: 11px; min-height: 43px; padding: 10px 14px; font-weight:
 .acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .acciones[hidden] { display: none; }
 #formulario-estado-venta { margin-top: 12px; }
+.controles-listado-ventas { margin: 0; padding: 0; border: 0; min-width: 0; }
+#filtro-ventas-anuladas { align-self: center; margin: 0; }
+#filtro-ventas-anuladas[hidden] { display: none; }
+#incluir-ventas-anuladas { width: auto; }
+.listado-ventas { padding: 0; margin: 12px 0 0; list-style: none; }
+.listado-ventas li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid #dbe5e9; }
+.boton-eliminar { color: #9a2626; border-color: #eec6c6; background: #fff5f5; }
 .formularios-administracion { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 20px; }
 .formularios-administracion h3 { margin: 12px 0; font-size: 1rem; }
 .formularios-administracion label:not(:first-of-type) { margin-top: 10px; }

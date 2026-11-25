@@ -21,8 +21,8 @@ test('Service Worker instala una versión coherente y deja pasar solicitudes pro
       addEventListener: (nombre, listener) => { eventos[nombre] = listener; },
     },
     caches: {
-      open: async (nombre) => { assert.equal(nombre, 'vehiculos-pwa-v9'); return cache; },
-      keys: async () => ['vehiculos-pwa-v8', 'vehiculos-pwa-v9', 'otra-app'],
+      open: async (nombre) => { assert.equal(nombre, 'vehiculos-pwa-v10'); return cache; },
+      keys: async () => ['vehiculos-pwa-v9', 'vehiculos-pwa-v10', 'otra-app'],
       delete: async (nombre) => { eliminados.push(nombre); },
     },
   });
@@ -42,16 +42,17 @@ test('Service Worker instala una versión coherente y deja pasar solicitudes pro
   }
   eventos.activate({ waitUntil: (promesa) => { tarea = promesa; } });
   await tarea;
-  assert.deepEqual(eliminados, ['vehiculos-pwa-v8']);
+  assert.deepEqual(eliminados, ['vehiculos-pwa-v9']);
 
   for (const [ruta, opciones] of [
     ['/api/login', { method: 'POST' }], ['/api/ventas/19'], ['/ventas.js?v=4'],
     ['/api/identidad'], ['/api/usuarios'], ['/api/roles'], ['/api/usuarios/1/clave', { method: 'PUT' }],
-    ['/ventas.js?v=5', { headers: { Authorization: 'Bearer simulado' } }],
+    ['/api/ventas?incluirAnuladas=true'], ['/api/ventas/19', { method: 'DELETE' }],
+    ['/ventas.js?v=6', { headers: { Authorization: 'Bearer simulado' } }],
   ]) {
     eventos.fetch({ request: new Request(origen + ruta, opciones), respondWith: () => assert.fail(ruta) });
   }
-  const solicitud = new Request(origen + '/ventas.js?v=5');
+  const solicitud = new Request(origen + '/ventas.js?v=6');
   eventos.fetch({ request: solicitud, respondWith: (promesa) => { tarea = promesa; } });
   assert.equal(await tarea, solicitud);
 });
@@ -67,10 +68,12 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
     addEventListener(nombre, listener) { this.eventos[nombre] = listener; },
   }]));
   const buscar = (id) => controles.get(id);
+  let confirmarAnulacion = false;
   const globales = { document: { querySelector: (selector) => buscar(selector.slice(1)), createElement: () => ({
-    hijos: [], append(...hijos) { this.hijos.push(...hijos); },
+    hijos: [], eventos: {}, append(...hijos) { this.hijos.push(...hijos); },
+    addEventListener(nombre, listener) { this.eventos[nombre] = listener; },
   }) },
-    window: { addEventListener() {} }, Option: class {
+    window: { addEventListener() {}, confirm: () => confirmarAnulacion }, Option: class {
       constructor(texto, valor) { this.text = texto; this.value = valor; }
       remove() {
         const selector = buscar('vehiculo-venta');
@@ -82,7 +85,7 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
     t.after(() => { delete globalThis[nombre]; });
   }
   const fetchSimulado = t.mock.method(globalThis, 'fetch', () => Response.json({}, { status: 401 }));
-  await import('../public/main.js?v=9');
+  await import('../public/main.js?v=10');
   const enviar = () => {
     buscar('usuario').value = 'persona';
     buscar('clave').value = 'clave simulada';
@@ -114,6 +117,8 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
   const rutas = [];
   let rolActivo = 'OPERADOR';
   const solicitudesAdmin = [];
+  const ventas = new Map();
+  const solicitudesAnular = [];
   let modoListas = 'parcial';
   let resolverVehiculos;
   let resolverCompradores;
@@ -163,25 +168,47 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
       }
       return Response.json(modoListas === 'vacío' ? [] : [1, 2].map((id) => ({ id, nombre: 'Nombre igual' })));
     }
-    if (ruta === '/api/ventas/19') {
+    if (ruta.startsWith('/api/ventas/')) {
+      const venta = ventas.get(Number(ruta.split('/').at(-1)));
+      if (opciones.method === 'DELETE') {
+        assert.equal(rolActivo, 'ADMIN');
+        solicitudesAnular.push(venta.id);
+        if (solicitudesAnular.length === 1) return new Response(null, { status: 409 });
+        if (solicitudesAnular.length === 2) {
+          venta.estado = 'ANULANDO';
+          return new Response(null, { status: 202 });
+        }
+        venta.estado = 'ANULADA';
+        catalogoRespuesta.find((v) => v.idVehiculo === venta.vehiculoId).estado = 'DISPONIBLE';
+        return new Response(null, { status: 204 });
+      }
       lecturasEstado.push(ruta);
-      return Response.json({ id: 19, ...JSON.parse(envios.at(-1).cuerpo), estado: 'COMPLETADA',
-        fechaUTC: '2026-11-20T02:00:00Z', precioAcordado: null, moneda: null });
+      return Response.json(venta);
+    }
+    if (ruta.startsWith('/api/ventas') && !opciones.method) {
+      const incluir = ruta.endsWith('?incluirAnuladas=true');
+      if (incluir) assert.equal(rolActivo, 'ADMIN');
+      return Response.json([...ventas.values()].filter((venta) => incluir || venta.estado !== 'ANULADA'));
     }
     assert.equal(ruta, '/api/ventas');
     envios.push({ clave: opciones.headers['Idempotency-Key'], cuerpo: opciones.body });
     const numero = envios.length;
     if (numero === 2) return new Response(null, { status: 504 });
-    return Response.json({ id: 19, ...JSON.parse(opciones.body),
+    const venta = { id: numero <= 3 ? 19 : numero + 16, ...JSON.parse(opciones.body),
       estado: numero === 1 ? 'EN_REVISION' : 'COMPLETADA', precioAcordado: null, moneda: null,
-    }, { status: numero === 1 ? 202 : numero === 3 ? 200 : 201 });
+      fechaUTC: '2026-11-20T02:00:00Z' };
+    ventas.set(venta.id, venta);
+    if (venta.estado === 'COMPLETADA') {
+      catalogoRespuesta.find((v) => v.idVehiculo === venta.vehiculoId).estado = 'VENDIDO';
+    }
+    return Response.json(venta, { status: numero === 1 ? 202 : numero === 3 ? 200 : 201 });
   });
   const vehiculo = buscar('vehiculo-venta');
   const comprador = buscar('comprador-venta');
   const limpiar = buscar('limpiar-seleccion');
   const acceso = enviar();
   await new Promise((resolver) => setImmediate(resolver));
-  assert.deepEqual(rutas, ['/api/login', '/api/identidad', '/api/vehiculos', '/api/compradores']);
+  assert.deepEqual(rutas, ['/api/login', '/api/identidad', '/api/vehiculos', '/api/compradores', '/api/ventas']);
   assert.deepEqual([vehiculo.options[0].text, comprador.options[0].text], ['Cargando...', 'Cargando...']);
   resolverCompradores();
   await new Promise((resolver) => setImmediate(resolver));
@@ -308,7 +335,9 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
   const inicioConsulta = rutas.length;
   await enviar();
   assert.equal(buscar('panel-administracion').hidden, true);
-  assert.deepEqual(rutas.slice(inicioConsulta), ['/api/login', '/api/identidad', '/api/vehiculos']);
+  assert.deepEqual(rutas.slice(inicioConsulta), ['/api/login', '/api/identidad', '/api/vehiculos', '/api/ventas']);
+  assert.equal(buscar('filtro-ventas-anuladas').hidden, true);
+  assert.ok(buscar('listado-ventas').hijos.every((fila) => fila.hijos.length === 1));
   assert.ok(vehiculo.disabled && comprador.disabled && buscar('registrar-venta').disabled);
   assert.match(buscar('mensaje-venta').textContent, /CONSULTA no puede registrar ventas/);
   seleccionar('44', '1');
@@ -339,6 +368,33 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
     ['/api/roles', 'GET'], ['/api/usuarios', 'GET'], ['/api/roles', 'POST'],
     ['/api/usuarios', 'POST'], ['/api/usuarios/2/clave', 'PUT'],
   ]);
+
+  const filaVenta19 = () => buscar('listado-ventas').hijos.find((fila) => fila.hijos[0].textContent.includes('Venta 19'));
+  const eliminar = () => filaVenta19().hijos[1].eventos.click();
+  assert.equal(buscar('filtro-ventas-anuladas').hidden, false);
+  assert.equal(filaVenta19().hijos[1].textContent, 'Eliminar');
+  assert.ok(!vehiculo.options.some(({ value }) => value === '44'));
+  await eliminar();
+  assert.deepEqual(solicitudesAnular, []);
+  confirmarAnulacion = true;
+  await eliminar();
+  assert.match(buscar('mensaje-listado-ventas').textContent, /no se puede eliminar/);
+  await eliminar();
+  assert.match(buscar('mensaje-listado-ventas').textContent, /pendiente/);
+  assert.equal(filaVenta19().hijos[1].textContent, 'Reintentar anulación');
+  await eliminar();
+  assert.deepEqual(solicitudesAnular, [19, 19, 19]);
+  assert.equal(buscar('mensaje-listado-ventas').textContent, 'Venta 19 anulada.');
+  assert.equal(filaVenta19(), undefined);
+  assert.ok(vehiculo.options.some(({ value }) => value === '44'));
+  buscar('incluir-ventas-anuladas').checked = true;
+  await buscar('incluir-ventas-anuladas').eventos.change();
+  assert.match(filaVenta19().hijos[0].textContent, /Anulada/);
+  assert.equal(filaVenta19().hijos.length, 1);
+  seleccionar('44', '1');
+  await registrar();
+  assert.notEqual(envios.at(-1).clave, envios[0].clave);
+  assert.ok(!vehiculo.options.some(({ value }) => value === '44'));
   buscar('cerrar-sesion').eventos.click();
   assert.equal(buscar('panel-administracion').hidden, true);
 });

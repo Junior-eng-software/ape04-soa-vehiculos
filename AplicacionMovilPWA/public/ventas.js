@@ -7,6 +7,47 @@ const mensajes = {
   422: 'Los datos de la solicitud no cumplen el contrato.',
 };
 
+export const estadosVenta = Object.freeze({
+  PENDIENTE: 'Pendiente', EN_REVISION: 'En revisión', FALLIDA: 'Fallida', COMPLETADA: 'Completada',
+  ANULANDO: 'Anulación pendiente', ANULADA: 'Anulada',
+});
+
+function esResumenVenta(venta) {
+  return [venta?.id, venta?.vehiculoId, venta?.compradorId].every((id) => Number.isSafeInteger(id) && id > 0)
+    && Object.hasOwn(estadosVenta, venta.estado)
+    && (venta.precioAcordado === null || typeof venta.precioAcordado === 'string')
+    && (venta.moneda === null || typeof venta.moneda === 'string')
+    && typeof venta.fechaUTC === 'string' && Number.isFinite(Date.parse(venta.fechaUTC));
+}
+
+export async function listarVentas(jwt, incluirAnuladas, signal, ejecutarFetch = fetch) {
+  const respuesta = await ejecutarFetch('/api/ventas' + (incluirAnuladas ? '?incluirAnuladas=true' : ''), {
+    headers: { Authorization: 'Bearer ' + jwt, Accept: 'application/json' },
+    cache: 'no-store', signal, redirect: 'error',
+  });
+  if (respuesta.status !== 200) throw errorHttp(respuesta.status);
+  const ventas = await respuesta.json().catch(() => null);
+  if (!Array.isArray(ventas) || !ventas.every(esResumenVenta)) {
+    throw new Error('La API no devolvió el listado esperado de ventas.');
+  }
+  return ventas;
+}
+
+export async function anularVenta(jwt, id, signal, ejecutarFetch = fetch) {
+  if (!Number.isSafeInteger(id) || id <= 0) throw new Error('El ID de venta debe ser entero y positivo.');
+  const limite = AbortSignal.timeout(40000);
+  const cancelacion = signal ? AbortSignal.any([signal, limite]) : limite;
+  const respuesta = await ejecutarFetch('/api/ventas/' + id, {
+    method: 'DELETE', headers: { Authorization: 'Bearer ' + jwt, Accept: 'application/json' },
+    cache: 'no-store', signal: cancelacion, redirect: 'error',
+  }).catch(() => { throw new Error('No se pudo confirmar la anulación. Actualice el listado.'); });
+  if (respuesta.status === 204 || respuesta.status === 202) return respuesta.status;
+  if (respuesta.status === 404) throw errorHttp(404, 'No se encontró la venta o su reserva.');
+  if (respuesta.status === 409) throw errorHttp(409, 'La venta no se puede eliminar en su estado actual.');
+  if (respuesta.status >= 500) throw errorHttp(respuesta.status, 'No se pudo confirmar la anulación. Actualice el listado.');
+  throw errorHttp(respuesta.status);
+}
+
 function errorHttp(status, mensaje = mensajes[status] || 'No se pudo confirmar la respuesta.') {
   return Object.assign(new Error('HTTP ' + status + ': ' + mensaje), {
     codigoHttp: status,
@@ -55,11 +96,7 @@ export async function consultarVenta(jwt, id, signal, ejecutarFetch = fetch) {
   if (codigo >= 500) throw errorHttp(codigo, 'Servicio de ventas no disponible.');
   if (codigo !== 200) throw errorHttp(codigo);
 
-  if (venta?.id !== Number(id) || !['PENDIENTE', 'EN_REVISION', 'FALLIDA', 'COMPLETADA'].includes(venta.estado)
-      || ![venta.vehiculoId, venta.compradorId].every((valor) => Number.isSafeInteger(valor) && valor > 0)
-      || !(venta.precioAcordado === null || typeof venta.precioAcordado === 'string')
-      || !(venta.moneda === null || typeof venta.moneda === 'string')
-      || typeof venta.fechaUTC !== 'string' || !Number.isFinite(Date.parse(venta.fechaUTC))) {
+  if (venta?.id !== Number(id) || !esResumenVenta(venta)) {
     throw new Error('La API no devolvió los datos esperados de la venta.');
   }
   return venta;
@@ -93,6 +130,12 @@ export async function registrarVenta(jwt, datos, clave, signal, ejecutarFetch = 
       const problema = await respuesta.json().catch(() => null);
       if (problema?.codigo === 'CLAVE_REUTILIZADA') {
         throw errorHttp(codigoHttp, 'La clave de idempotencia ya corresponde a otra solicitud.');
+      }
+      if (problema?.codigo === 'VENTA_ANULADA') {
+        throw errorHttp(codigoHttp, 'La venta fue anulada. Inicie una operación nueva para revender.');
+      }
+      if (problema?.codigo === 'ANULACION_PENDIENTE') {
+        throw errorHttp(codigoHttp, 'La anulación de esa venta está pendiente.');
       }
     }
     throw errorHttp(codigoHttp);

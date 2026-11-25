@@ -1,7 +1,7 @@
 import { ErrorAcceso, iniciarSesion, listarVehiculos, solicitarApi } from './api.js?v=6';
 import { crearAdministracion } from './administracion.js?v=1';
 import { crearSesion } from './sesion.js?v=5';
-import { consultarVenta, crearRegistroVenta, listarCompradores } from './ventas.js?v=5';
+import { anularVenta, consultarVenta, crearRegistroVenta, estadosVenta, listarCompradores, listarVentas } from './ventas.js?v=6';
 
 // Referencias a los controles de la interfaz móvil.
 const formulario = document.querySelector('#formulario');
@@ -41,6 +41,13 @@ const campoEstadoVenta = document.querySelector('#id-estado-venta');
 const botonEstadoVenta = document.querySelector('#consultar-estado-venta');
 const mensajeEstadoVenta = document.querySelector('#mensaje-estado-venta');
 const detalleEstadoVenta = document.querySelector('#detalle-estado-venta');
+const panelListadoVentas = document.querySelector('#panel-listado-ventas');
+const controlesListadoVentas = document.querySelector('#controles-listado-ventas');
+const botonActualizarVentas = document.querySelector('#actualizar-ventas');
+const filtroVentasAnuladas = document.querySelector('#filtro-ventas-anuladas');
+const incluirVentasAnuladas = document.querySelector('#incluir-ventas-anuladas');
+const listadoVentas = document.querySelector('#listado-ventas');
+const mensajeListadoVentas = document.querySelector('#mensaje-listado-ventas');
 
 const moneda = new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' });
 const fechaComercial = new Intl.DateTimeFormat('es-EC', {
@@ -50,6 +57,7 @@ const sesion = crearSesion();
 const administracion = crearAdministracion(sesionVencida);
 const registro = crearRegistroVenta();
 let puedeVender = false;
+let esAdmin = false;
 let solicitud;
 let temporizador;
 let idVentaReciente;
@@ -86,6 +94,12 @@ function mostrarEstadoVenta(texto, tipo = 'neutro') {
   mensajeEstadoVenta.className = 'mensaje ' + tipo;
   mensajeEstadoVenta.hidden = !texto;
   detalleEstadoVenta.replaceChildren();
+}
+
+function mostrarMensajeListadoVentas(texto, tipo = 'neutro', codigo) {
+  mostrarTexto(mensajeListadoVentas, texto, codigo);
+  mensajeListadoVentas.className = 'mensaje ' + tipo;
+  mensajeListadoVentas.hidden = !texto;
 }
 
 function recordarIdVenta(id) {
@@ -167,6 +181,7 @@ function actualizarAcciones() {
   botonVenta.disabled = !puedeVender || ocupado || !selectorVehiculo.value || !selectorComprador.value;
   botonVenta.textContent = pendiente ? 'Reintentar misma venta' : 'Registrar venta';
   campoEstadoVenta.disabled = botonEstadoVenta.disabled = botonVentaReciente.disabled = ocupado;
+  controlesListadoVentas.disabled = ocupado;
 }
 
 function crearElemento(etiqueta, clase, contenido) {
@@ -236,6 +251,8 @@ function pintarListado(vehiculos) {
 function mostrarSesionActiva(activa) {
   panelAcceso.hidden = activa;
   panelSesion.hidden = panelCatalogo.hidden = panelVenta.hidden = panelEstadoVenta.hidden = !activa;
+  panelListadoVentas.hidden = !activa;
+  filtroVentasAnuladas.hidden = !activa || !esAdmin;
 }
 
 function cerrarSesion(texto, tipo = 'neutro') {
@@ -246,6 +263,10 @@ function cerrarSesion(texto, tipo = 'neutro') {
   sesion.cerrar();
   administracion.cerrar();
   puedeVender = false;
+  esAdmin = false;
+  incluirVentasAnuladas.checked = false;
+  listadoVentas.replaceChildren();
+  mostrarMensajeListadoVentas('');
   perfilSesion.textContent = '';
   registro.limpiar();
   formulario.reset();
@@ -304,6 +325,7 @@ formulario.addEventListener('submit', async (evento) => {
       throw new ErrorAcceso('El servidor devolvió una identidad inválida.');
     }
     puedeVender = base !== 'ROLE_CONSULTA';
+    esAdmin = base === 'ROLE_ADMIN';
     perfilSesion.textContent = `${identidad.usuario} · ${identidad.rolNombre}`;
     formulario.reset();
     mostrarSesionActiva(true);
@@ -315,6 +337,7 @@ formulario.addEventListener('submit', async (evento) => {
     if (actual?.signal.aborted) return;
     sesion.cerrar();
     puedeVender = false;
+    esAdmin = false;
     perfilSesion.textContent = '';
     clearTimeout(temporizador);
     mostrarMensaje(error.codigoHttp === 403 ? 'HTTP 403: No tiene permiso para consultar su identidad.'
@@ -339,7 +362,7 @@ function informarDisponibles(cantidad) {
 }
 
 async function cargarLista(jwt, signal, selector, estado, consultar, nombre) {
-  cargarOpciones(selector, [], 'Cargando...');
+  if (selector) cargarOpciones(selector, [], 'Cargando...');
   estado.className = 'estado-lista';
   estado.textContent = `Cargando ${nombre}…`;
   try {
@@ -350,7 +373,7 @@ async function cargarLista(jwt, signal, selector, estado, consultar, nombre) {
   } catch (error) {
     if (signal.aborted) return;
     if (error.codigoHttp === 401) return sesionVencida();
-    cargarOpciones(selector, [], 'Lista no disponible');
+    if (selector) cargarOpciones(selector, [], 'Lista no disponible');
     estado.className = 'estado-lista error';
     mostrarTexto(estado, error.codigoHttp === 403 ? `No tiene permiso para consultar ${nombre}.`
       : `No se pudieron cargar ${nombre}. Use «Actualizar listas» para reintentar.`, error.codigoHttp);
@@ -362,7 +385,8 @@ async function cargarVehiculos(jwt, signal) {
     limpiarListado();
     contenedor.append(crearElemento('p', 'vacio', 'Cargando catálogo…'));
   }
-  const respuesta = await cargarLista(jwt, signal, selectorVehiculo, estadoListaVehiculos,
+  const selector = registro.pendiente() ? null : selectorVehiculo;
+  const respuesta = await cargarLista(jwt, signal, selector, estadoListaVehiculos,
     (token, cancelacion) => listarVehiculos(token, fetch, cancelacion), 'vehículos');
   if (signal.aborted) return;
   if (!respuesta) {
@@ -377,7 +401,7 @@ async function cargarVehiculos(jwt, signal) {
   const opciones = vehiculos.filter((v) => v.estado === 'DISPONIBLE'
     && Number.isSafeInteger(v.idVehiculo) && v.idVehiculo > 0)
     .map((v) => new Option(`${v.marca} ${v.modelo} (ID ${v.idVehiculo})`, String(v.idVehiculo)));
-  cargarOpciones(selectorVehiculo, opciones, opciones.length ? 'Seleccione un vehículo' : 'No hay vehículos disponibles');
+  if (selector) cargarOpciones(selector, opciones, opciones.length ? 'Seleccione un vehículo' : 'No hay vehículos disponibles');
   informarDisponibles(opciones.length);
 }
 
@@ -390,18 +414,47 @@ async function cargarCompradores(jwt, signal) {
   estadoListaCompradores.textContent = opciones.length ? '' : 'Registre un comprador desde Windows Forms y actualice las listas.';
 }
 
-async function actualizarListas() {
+async function cargarListadoVentas(jwt, signal) {
+  try {
+    const ventas = await listarVentas(jwt, esAdmin && incluirVentasAnuladas.checked, signal);
+    if (signal.aborted) return;
+    if (!sesion.leer()) return sesionVencida();
+    listadoVentas.replaceChildren();
+    for (const venta of [...ventas].reverse()) {
+      const fila = crearElemento('li');
+      fila.append(crearElemento('span', '', `Venta ${venta.id} · Vehículo ${venta.vehiculoId} · ${estadosVenta[venta.estado]}`));
+      if (esAdmin && ['COMPLETADA', 'FALLIDA', 'ANULANDO'].includes(venta.estado)) {
+        const boton = crearElemento('button', 'boton-secundario boton-eliminar',
+          venta.estado === 'ANULANDO' ? 'Reintentar anulación' : 'Eliminar');
+        boton.type = 'button';
+        boton.addEventListener('click', () => eliminarVenta(venta.id));
+        fila.append(boton);
+      }
+      listadoVentas.append(fila);
+    }
+    mostrarMensajeListadoVentas(ventas.length ? '' : 'No hay ventas en este listado.');
+  } catch (error) {
+    if (signal.aborted) return;
+    if (error.codigoHttp === 401) return sesionVencida();
+    listadoVentas.replaceChildren();
+    mostrarMensajeListadoVentas(error.codigoHttp === 403 ? 'No tiene permiso para consultar este listado.'
+      : 'No se pudo actualizar el listado de ventas.', 'error', error.codigoHttp);
+  }
+}
+
+async function actualizarListas({ soloVentas = false } = {}) {
   const jwt = sesion.leer();
   if (!jwt) return sesionVencida();
-  if (solicitud || registro.pendiente()) return;
+  if (solicitud || (!soloVentas && registro.pendiente())) return;
 
   const actual = new AbortController();
   solicitud = actual;
   actualizarAcciones();
   try {
     await Promise.all([
-      cargarVehiculos(jwt, actual.signal),
-      puedeVender && cargarCompradores(jwt, actual.signal),
+      !soloVentas && cargarVehiculos(jwt, actual.signal),
+      !soloVentas && puedeVender && cargarCompradores(jwt, actual.signal),
+      cargarListadoVentas(jwt, actual.signal),
     ]);
   } finally {
     if (solicitud === actual) {
@@ -412,6 +465,40 @@ async function actualizarListas() {
 }
 
 botonActualizarListas.addEventListener('click', actualizarListas);
+botonActualizarVentas.addEventListener('click', () => actualizarListas({ soloVentas: true }));
+incluirVentasAnuladas.addEventListener('change', () => actualizarListas({ soloVentas: true }));
+
+async function eliminarVenta(id) {
+  const jwt = sesion.leer();
+  if (!jwt) return sesionVencida();
+  if (!esAdmin || solicitud || !window.confirm(`¿Eliminar la venta ${id} mediante una anulación?`)) return;
+  const actual = new AbortController();
+  solicitud = actual;
+  actualizarAcciones();
+  mostrarMensajeListadoVentas('Anulando venta…');
+  try {
+    const codigo = await anularVenta(jwt, id, actual.signal);
+    if (actual.signal.aborted) return;
+    if (!sesion.leer()) return sesionVencida();
+    await Promise.all([cargarListadoVentas(jwt, actual.signal), cargarVehiculos(jwt, actual.signal)]);
+    if (actual.signal.aborted) return;
+    const pendiente = codigo === 202;
+    mostrarMensajeListadoVentas(pendiente ? `Anulación de la venta ${id} pendiente. Puede reintentarla desde el listado.`
+      : `Venta ${id} anulada.`, pendiente ? 'aviso' : 'exito', codigo);
+    if (campoEstadoVenta.value.trim() === String(id)) {
+      mostrarEstadoVenta(`Venta ${id} · ${estadosVenta[pendiente ? 'ANULANDO' : 'ANULADA']}`, pendiente ? 'aviso' : 'exito');
+    }
+  } catch (error) {
+    if (actual.signal.aborted) return;
+    if (error.codigoHttp === 401) return sesionVencida();
+    mostrarMensajeListadoVentas(error.message, error.codigoHttp === 409 ? 'aviso' : 'error');
+  } finally {
+    if (solicitud === actual) {
+      solicitud = null;
+      actualizarAcciones();
+    }
+  }
+}
 
 selectorVehiculo.addEventListener('change', actualizarAcciones);
 selectorComprador.addEventListener('change', actualizarAcciones);
@@ -435,9 +522,9 @@ async function cargarEstadoVenta() {
     const venta = await consultarVenta(jwt, id, actual.signal);
     if (actual.signal.aborted) return;
     if (!sesion.leer()) return sesionVencida();
-    const tipo = { COMPLETADA: 'exito', EN_REVISION: 'aviso', PENDIENTE: 'aviso', FALLIDA: 'error' };
-    const estados = { COMPLETADA: 'Completada', EN_REVISION: 'En revisión', PENDIENTE: 'Pendiente', FALLIDA: 'Fallida' };
-    mostrarEstadoVenta(`Venta ${venta.id} · ${estados[venta.estado]}`, tipo[venta.estado]);
+    const tipo = { COMPLETADA: 'exito', EN_REVISION: 'aviso', PENDIENTE: 'aviso', FALLIDA: 'error',
+      ANULANDO: 'aviso', ANULADA: 'neutro' };
+    mostrarEstadoVenta(`Venta ${venta.id} · ${estadosVenta[venta.estado]}`, tipo[venta.estado]);
     const grilla = crearElemento('div', 'datos');
     agregarDato(grilla, 'ID de vehículo', venta.vehiculoId);
     agregarDato(grilla, 'ID de comprador', venta.compradorId);
@@ -499,6 +586,10 @@ formularioVenta.addEventListener('submit', async (evento) => {
       mostrarVenta(`Venta ${venta.id} completada.` + importe, 'exito', codigoHttp);
       idConfirmado = venta.id;
     }
+    await Promise.all([
+      cargarListadoVentas(jwt, actual.signal),
+      cargarVehiculos(jwt, actual.signal),
+    ]);
   } catch (error) {
     if (actual.signal.aborted) return;
     if (error.codigoHttp === 401) return sesionVencida();
@@ -513,7 +604,7 @@ formularioVenta.addEventListener('submit', async (evento) => {
       actualizarAcciones();
     }
   }
-  if (Number.isSafeInteger(idConfirmado) && idConfirmado > 0) {
+  if (!actual.signal.aborted && Number.isSafeInteger(idConfirmado) && idConfirmado > 0) {
     campoEstadoVenta.value = String(idConfirmado);
     await cargarEstadoVenta();
   }

@@ -12,7 +12,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=9" />
+    <link rel="stylesheet" href="/styles.css?v=10" />
   </head>
   <body>
     <div class="app">
@@ -91,7 +91,7 @@
           <form id="formulario-venta" method="post">
             <div class="opciones-venta">
               <div>
-                <label for="vehiculo-venta">Vehículo disponible</label>
+                <label for="vehiculo-venta">Vehículos disponibles</label>
                 <select id="vehiculo-venta" required>
                   <option value="">Seleccione un vehículo</option>
                 </select>
@@ -114,6 +114,21 @@
           <div class="acciones" id="acciones-venta-reciente" hidden>
             <button id="consultar-venta-reciente" class="boton-secundario" type="button">Consultar estado de esta venta</button>
           </div>
+        </section>
+
+        <section id="panel-listado-ventas" class="panel" aria-labelledby="titulo-listado-ventas" hidden>
+          <h2 id="titulo-listado-ventas">Ventas</h2>
+          <fieldset id="controles-listado-ventas" class="controles-listado-ventas">
+            <div class="acciones">
+              <button id="actualizar-ventas" class="boton-discreto" type="button">Actualizar ventas</button>
+              <label id="filtro-ventas-anuladas" hidden>
+                <input type="checkbox" id="incluir-ventas-anuladas" />
+                Incluir ventas anuladas
+              </label>
+            </div>
+            <ul id="listado-ventas" class="listado-ventas"></ul>
+          </fieldset>
+          <div id="mensaje-listado-ventas" class="mensaje neutro" role="status" hidden></div>
         </section>
 
         <section id="panel-estado-venta" class="panel" aria-labelledby="titulo-estado-venta" hidden>
@@ -150,7 +165,7 @@
     </div>
     <script type="module">
       const mensaje = document.querySelector('#mensaje');
-      import('/main.js?v=9').then(() => {
+      import('/main.js?v=10').then(() => {
         mensaje.textContent = 'Ingrese sus credenciales para continuar.';
         document.querySelector('#ingresar').disabled = false;
       }).catch(() => {

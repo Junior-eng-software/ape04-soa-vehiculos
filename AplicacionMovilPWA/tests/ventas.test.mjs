@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { crearServidor } from '../server.mjs';
-import { consultarVenta, crearRegistroVenta, listarCompradores, registrarVenta } from '../public/ventas.js';
+import { anularVenta, consultarVenta, crearRegistroVenta, listarCompradores, listarVentas, registrarVenta } from '../public/ventas.js';
 
 const seleccion = { vehiculoId: 7, compradorId: 3 };
 const venta = {
@@ -187,10 +187,48 @@ test('GET individual reenvía Bearer y conserva la decisión de propietario o AD
   for (const ruta of ['/api/ventas/0', '/api/ventas/-3', '/api/ventas/x', '/api/ventas/9007199254740992']) {
     assert.equal((await fetch(frontend + ruta)).status, 400);
   }
-  assert.equal((await fetch(frontend + '/api/ventas')).status, 404);
   assert.equal((await fetch(frontend + '/api/ventas/19/interna')).status, 404);
   assert.equal((await fetch(frontend + '/api/ventas/19', { method: 'POST' })).status, 404);
   assert.equal(llamadas, 6);
+});
+
+test('proxy reenvía el filtro de anuladas y las respuestas 202 y 204 de DELETE', async (t) => {
+  const token = crypto.randomUUID();
+  let estado = 'COMPLETADA';
+  const llamadas = [];
+  const backend = createServer((req, res) => {
+    assert.equal(req.headers.authorization, 'Bearer ' + token);
+    llamadas.push([req.method, req.url]);
+    if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(estado !== 'ANULADA' || req.url.endsWith('?incluirAnuladas=true')
+        ? [{ ...detalleVenta, estado }] : []));
+    }
+    assert.equal(req.url, '/api/ventas/19');
+    if (estado === 'COMPLETADA') {
+      estado = 'ANULANDO';
+      res.writeHead(202, { Location: '/api/ventas/19' });
+    } else {
+      estado = 'ANULADA';
+      res.writeHead(204);
+    }
+    res.end();
+  });
+  const apiBase = await escuchar(backend, t);
+  const origen = await escuchar(crearServidor({ apiBase }), t);
+  const descargar = (ruta, opciones) => fetch(origen + ruta, opciones);
+  assert.equal((await fetch(origen + '/api/ventas/19', { method: 'DELETE', headers: { Origin: 'https://ajeno.test' } })).status, 403);
+  assert.equal((await fetch(origen + '/api/ventas/19', { method: 'DELETE', body: '{}' })).status, 400);
+  assert.equal((await fetch(origen + '/api/ventas/-2', { method: 'DELETE' })).status, 400);
+  assert.equal(await anularVenta(token, 19, undefined, descargar), 202);
+  assert.equal((await listarVentas(token, false, undefined, descargar))[0].estado, 'ANULANDO');
+  assert.equal(await anularVenta(token, 19, undefined, descargar), 204);
+  assert.deepEqual(await listarVentas(token, false, undefined, descargar), []);
+  assert.equal((await listarVentas(token, true, undefined, descargar))[0].estado, 'ANULADA');
+  assert.deepEqual(llamadas, [
+    ['DELETE', '/api/ventas/19'], ['GET', '/api/ventas'], ['DELETE', '/api/ventas/19'],
+    ['GET', '/api/ventas'], ['GET', '/api/ventas?incluirAnuladas=true'],
+  ]);
 });
 
 test('consulta reconoce todos los estados y conserva importe decimal y nulos', async () => {
