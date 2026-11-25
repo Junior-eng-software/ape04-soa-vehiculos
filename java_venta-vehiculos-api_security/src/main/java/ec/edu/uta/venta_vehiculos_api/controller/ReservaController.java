@@ -43,6 +43,10 @@ public class ReservaController {
   // Devuelve el resultado del método.
   return service.confirmar(id);
  }
+ @PutMapping("/api/reservas/{id}/anulacion")
+ public ReservaResponse anular(@PathVariable String id) {
+  return service.anular(id);
+ }
  // Configura el comportamiento de Spring o el mapeo ORM.
  @DeleteMapping("/api/reservas/{id}")
  // Declara un método o constructor público.

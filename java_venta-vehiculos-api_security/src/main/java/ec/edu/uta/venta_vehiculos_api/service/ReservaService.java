@@ -72,6 +72,8 @@ public class ReservaService {
   if ("LIBERADA".equals(r.estado))
    // Genera un error de negocio que capturará el manejador.
    throw conflicto("La reserva fue liberada");
+  if ("ANULADA".equals(r.estado))
+   throw conflicto("La reserva fue anulada");
   // Evalúa una condición o recorre elementos.
   if ("RESERVADA".equals(r.estado)) {
    // Evalúa una condición o recorre elementos.
@@ -81,6 +83,16 @@ public class ReservaService {
    r.estado="CONFIRMADA"; r.vehiculo.setEstado("VENDIDO");
   }
   // Devuelve el resultado del método.
+  return ReservaResponse.de(r);
+ }
+ public ReservaResponse anular(String id) {
+  Reserva r = bloquear(id);
+  if ("ANULADA".equals(r.estado))
+   return ReservaResponse.de(r);
+  if (!"CONFIRMADA".equals(r.estado) || !"VENDIDO".equals(r.vehiculo.getEstado()))
+   throw conflicto("Para anular se requiere una reserva confirmada y un vehículo vendido");
+  r.estado = "ANULADA";
+  r.vehiculo.setEstado("DISPONIBLE");
   return ReservaResponse.de(r);
  }
  // Declara un método o constructor público.
