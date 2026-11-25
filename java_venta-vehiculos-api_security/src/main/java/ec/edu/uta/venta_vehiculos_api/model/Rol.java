@@ -9,10 +9,10 @@ import jakarta.persistence.Table;
 @Table(name = "roles")
 public class Rol {
     @Id
-    @Column(length = 30)
+    @Column(length = 30, nullable = false)
     private String nombre;
 
-    @Column(nullable = false)
+    @Column(length = 255, nullable = false)
     private String descripcion;
 
     @Column(name = "rol_base", length = 8, nullable = false)
