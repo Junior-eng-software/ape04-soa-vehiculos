@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const GATEWAY_LOCAL = 'http://127.0.0.1:8090';
+const MAX_JSON = 8192;
 const TIPOS = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.png': 'image/png',
@@ -34,6 +35,25 @@ function origenLocalPermitido(peticion) {
   }
 }
 
+function esJson(peticion) {
+  return peticion.headers['content-type']?.split(';')[0].trim().toLowerCase() === 'application/json';
+}
+
+async function leerCuerpo(peticion, respuesta) {
+  const trozos = [];
+  let tamano = 0;
+  for await (const trozo of peticion.iterator({ destroyOnReturn: false })) {
+    tamano += trozo.length;
+    if (tamano > MAX_JSON) {
+      peticion.resume();
+      responderJson(respuesta, 413, { error: 'Solicitud demasiado grande.' });
+      return null;
+    }
+    trozos.push(trozo);
+  }
+  return Buffer.concat(trozos);
+}
+
 async function autenticar(peticion, respuesta, urlToken, clientePwa) {
   if (peticion.method !== 'POST') {
     respuesta.setHeader('Allow', 'POST');
@@ -42,7 +62,7 @@ async function autenticar(peticion, respuesta, urlToken, clientePwa) {
   if (!origenLocalPermitido(peticion)) {
     return responderJson(respuesta, 403, { error: 'Origen no autorizado.' });
   }
-  if (peticion.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+  if (!esJson(peticion)) {
     return responderJson(respuesta, 415, { error: 'Se requiere un cuerpo JSON.' });
   }
   if (!clientePwa.id?.trim() || !clientePwa.secreto?.trim()) {
@@ -51,17 +71,9 @@ async function autenticar(peticion, respuesta, urlToken, clientePwa) {
 
   let datos;
   try {
-    const trozos = [];
-    let tamano = 0;
-    for await (const trozo of peticion.iterator({ destroyOnReturn: false })) {
-      tamano += trozo.length;
-      if (tamano > 8192) {
-        peticion.resume();
-        return responderJson(respuesta, 413, { error: 'Solicitud demasiado grande.' });
-      }
-      trozos.push(trozo);
-    }
-    datos = JSON.parse(Buffer.concat(trozos).toString('utf8'));
+    const cuerpo = await leerCuerpo(peticion, respuesta);
+    if (cuerpo === null) return;
+    datos = JSON.parse(cuerpo.toString('utf8'));
   } catch {
     return responderJson(respuesta, 400, { error: 'Solicitud de acceso inválida.' });
   }
@@ -132,13 +144,42 @@ export function crearServidor({
     }
 
     if (url.pathname.startsWith('/api/')) {
+      const cambioClave = /^\/api\/usuarios\/([^/]+)\/clave$/.exec(url.pathname);
+      const listaAdmin = ['/api/usuarios', '/api/roles'].includes(url.pathname);
+      const identidad = url.pathname === '/api/identidad';
+      const nuevaRuta = listaAdmin || cambioClave || identidad;
+      let cuerpo;
+      if (nuevaRuta) {
+        const metodos = identidad ? ['GET'] : cambioClave ? ['PUT'] : ['GET', 'POST'];
+        if (!metodos.includes(peticion.method)) {
+          respuesta.setHeader('Allow', metodos.join(', '));
+          return responderJson(respuesta, 405, { error: 'Método no permitido.' });
+        }
+        if (!origenLocalPermitido(peticion)) {
+          return responderJson(respuesta, 403, { error: 'Origen no autorizado.' });
+        }
+        if (cambioClave && (!/^[1-9]\d*$/.test(cambioClave[1]) || Number(cambioClave[1]) > 2147483647)) {
+          return responderJson(respuesta, 400, { error: 'El ID de usuario debe ser un entero positivo válido.' });
+        }
+        if (peticion.method !== 'GET') {
+          if (!esJson(peticion)) {
+            return responderJson(respuesta, 415, { error: 'Se requiere un cuerpo JSON.' });
+          }
+          try {
+            cuerpo = await leerCuerpo(peticion, respuesta);
+            if (cuerpo === null) return;
+          } catch {
+            return responderJson(respuesta, 400, { error: 'Solicitud JSON inválida.' });
+          }
+        }
+      }
       const venta = url.pathname === '/api/ventas' && peticion.method === 'POST';
       const listado = ['/api/vehiculos', '/api/compradores'].includes(url.pathname) && peticion.method === 'GET';
       const detalle = peticion.method === 'GET' && /^\/api\/ventas\/([^/]+)$/.exec(url.pathname);
       if (detalle && (!/^[1-9]\d*$/.test(detalle[1]) || !Number.isSafeInteger(Number(detalle[1])))) {
         return responderJson(respuesta, 400, { error: 'El ID de venta debe ser un entero positivo válido.' });
       }
-      if (!venta && !listado && !detalle) {
+      if (!nuevaRuta && !venta && !listado && !detalle) {
         return responderJson(respuesta, 404, { error: 'Endpoint no disponible.' });
       }
       if (venta && !origenLocalPermitido(peticion)) {
@@ -149,12 +190,14 @@ export function crearServidor({
       try {
         const encabezados = new Headers({ Accept: 'application/json' });
         if (peticion.headers.authorization) encabezados.set('Authorization', peticion.headers.authorization);
+        if (cuerpo) encabezados.set('Content-Type', peticion.headers['content-type']);
         if (venta) {
           if (peticion.headers['content-type']) encabezados.set('Content-Type', peticion.headers['content-type']);
           if (peticion.headers['idempotency-key']) encabezados.set('Idempotency-Key', peticion.headers['idempotency-key']);
         }
         const remoto = await fetch(destino + url.pathname, {
           method: peticion.method, headers: encabezados, signal, cache: 'no-store', redirect: 'manual',
+          ...(cuerpo && { body: cuerpo }),
           ...(venta && { body: Readable.toWeb(peticion), duplex: 'half' }),
         });
         const datos = Buffer.from(await remoto.arrayBuffer());

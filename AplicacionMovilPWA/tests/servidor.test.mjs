@@ -81,3 +81,58 @@ test('proxy reenvía Bearer y respuesta HTTP del backend', async () => {
     await new Promise((r) => backend.close(r));
   }
 });
+
+test('proxy de administración limita rutas, métodos, origen, tipo y tamaño', async (t) => {
+  const token = crypto.randomUUID();
+  const llamadas = [];
+  const backend = createServer(async (req, res) => {
+    const trozos = [];
+    for await (const trozo of req) trozos.push(trozo);
+    llamadas.push([req.method, req.url, req.headers.authorization, req.headers['content-type'],
+      Buffer.concat(trozos).toString()]);
+    const estado = req.method === 'PUT' ? 204 : req.method === 'POST' ? 201 : 200;
+    res.writeHead(estado, { 'Content-Type': 'application/json' });
+    res.end(estado === 204 ? undefined : '{}');
+  }).listen(0, '127.0.0.1');
+  t.after(() => new Promise((resolver) => backend.close(resolver)));
+  await once(backend, 'listening');
+  const frontend = crearServidor({ apiBase: 'http://127.0.0.1:' + backend.address().port }).listen(0, '127.0.0.1');
+  t.after(() => new Promise((resolver) => frontend.close(resolver)));
+  await once(frontend, 'listening');
+  const origen = 'http://127.0.0.1:' + frontend.address().port;
+  const bearer = 'Bearer ' + token;
+  const tipo = 'application/json; charset=utf-8';
+  const pedir = (ruta, method = 'GET', body, encabezados = {}) => fetch(origen + ruta, {
+    method, body, headers: { Authorization: bearer, Origin: origen,
+      ...(body !== undefined && { 'Content-Type': tipo }), ...encabezados },
+  });
+  const rol = JSON.stringify({ nombre: 'VENDEDOR', rolBase: 'OPERADOR', descripcion: '' });
+  const clave = JSON.stringify({ clave: crypto.randomUUID() });
+  const usuario = JSON.stringify({ ...JSON.parse(clave), username: 'vendedor_demo', rol: 'VENDEDOR' });
+
+  for (const ruta of ['/api/identidad', '/api/usuarios', '/api/roles']) {
+    const respuesta = await pedir(ruta);
+    assert.equal(respuesta.status, 200);
+    assert.equal(respuesta.headers.get('cache-control'), 'no-store');
+    assert.equal(respuesta.headers.get('vary'), 'Authorization');
+  }
+  assert.equal((await pedir('/api/roles', 'POST', rol)).status, 201);
+  assert.equal((await pedir('/api/usuarios', 'POST', usuario)).status, 201);
+  assert.equal((await pedir('/api/usuarios/1/clave', 'PUT', clave)).status, 204);
+  const denegado = await pedir('/api/roles', 'DELETE');
+  assert.equal(denegado.status, 405);
+  assert.equal(denegado.headers.get('allow'), 'GET, POST');
+  assert.equal((await pedir('/api/roles/ADMIN', 'DELETE')).status, 404);
+  assert.equal((await pedir('/api/usuarios/2147483648/clave', 'PUT', clave)).status, 400);
+  assert.equal((await pedir('/api/roles', 'POST', rol, { Origin: 'https://ajeno.test' })).status, 403);
+  assert.equal((await pedir('/api/usuarios', 'GET', undefined, { Origin: 'null' })).status, 403);
+  assert.equal((await pedir('/api/usuarios/1/clave', 'PUT', clave, { 'Content-Type': 'text/plain' })).status, 415);
+  assert.equal((await pedir('/api/roles', 'POST', 'x'.repeat(8193))).status, 413);
+  assert.deepEqual(llamadas.slice(0, 3).map(([method, ruta, auth]) => [method, ruta, auth]),
+    ['/api/identidad', '/api/usuarios', '/api/roles'].map((ruta) => ['GET', ruta, bearer]));
+  assert.deepEqual(llamadas.slice(3).map(([method, ruta, auth, contentType]) => [method, ruta, auth, contentType]), [
+    ['POST', '/api/roles', bearer, tipo], ['POST', '/api/usuarios', bearer, tipo],
+    ['PUT', '/api/usuarios/1/clave', bearer, tipo],
+  ]);
+  assert.ok(llamadas[3][4] === rol && llamadas[4][4] === usuario && llamadas[5][4] === clave);
+});
