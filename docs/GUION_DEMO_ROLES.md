@@ -10,16 +10,19 @@ mantenerlas junto con los JWT fuera de archivos versionados y capturas.
 
 1. En una instalación de Java existente, verificar con
    `SHOW CREATE TABLE venta_vehiculos.usuarios_api;` que el CHECK anterior se
-   llama `chk_usuarios_api_rol`. Si el esquema difiere, revisar la diferencia
+   llama `chk_usuarios_api_rol` y que la tabla usa InnoDB, `utf8mb4` y
+   `utf8mb4_unicode_ci`. Si el esquema difiere, revisar la diferencia
    antes de aplicar. En una instalación vacía, ejecutar primero
    [001_schema.sql](../java_venta-vehiculos-api_security/sql/001_schema.sql) y
    [002_vehiculo_color_opcional.sql](../java_venta-vehiculos-api_security/sql/002_vehiculo_color_opcional.sql).
-2. Suspender las escrituras sobre `usuarios_api` mientras se aplica
+2. Suspender las escrituras sobre `usuarios_api` y ejecutar con el cliente
+   `mysql` de XAMPP o `mariadb`
    [003_roles_usuarios.sql](../java_venta-vehiculos-api_security/sql/003_roles_usuarios.sql).
    La migración crea y siembra `roles`, convierte variantes del nombre que
    admitía el CHECK anterior a sus nombres canónicos y sustituye el CHECK por
-   una FK. MariaDB confirma el DDL de forma implícita. Si falla, inspeccionar el
-   estado del esquema antes de reintentar.
+   una FK. Una segunda aplicación devuelve el error 1050 al encontrar `roles`.
+   MariaDB confirma el DDL de forma implícita. Si la primera aplicación falla,
+   inspeccionar el estado del esquema antes de reintentar.
 3. Una vez que existen `ventas_api.compradores` y `ventas_api.ventas`, aplicar
    [003_permisos_servicios.sql](../sql/003_permisos_servicios.sql).
    En una instalación vacía de Ventas, el DBA prepara previamente
@@ -34,6 +37,30 @@ mantenerlas junto con los JWT fuera de archivos versionados y capturas.
    Validar NGINX con `nginx -t`, cargar su configuración y publicar la PWA
    actualizada. Abrir la PWA y comprobar que una cuenta de sistema conserva su
    acceso.
+
+## Reversión para el DBA
+
+Suspender las escrituras y ejecutar con el mismo cliente
+[003_roles_usuarios_rollback.sql](../java_venta-vehiculos-api_security/sql/003_roles_usuarios_rollback.sql).
+El script se detiene antes del DDL si algún usuario tiene un rol propio
+asignado. Cuando la reversión procede, restaura el CHECK y el `VARCHAR(20)`
+originales y elimina el catálogo de roles, incluidos los roles propios sin
+usuarios. Desplegar la versión anterior de Java antes de reanudar el servicio.
+
+## Pruebas de persistencia
+
+En una instancia desechable de MariaDB en loopback, aplicar los scripts Java
+`001`, `002` y `003`. En la terminal, definir `VEHICULOS_TEST_DB_PORT` con
+el puerto efímero, `VEHICULOS_TEST_DB_DATADIR` con la ruta absoluta de su
+directorio de datos, y `VEHICULOS_TEST_DB_USER` y `VEHICULOS_TEST_DB_PASSWORD`
+con las credenciales de esa instancia. Ejecutar desde el módulo Java
+`.\mvnw.cmd -Dtest=AdministracionMariaDbTest test`. El arnés comprueba
+`@@datadir` antes de escribir y usa `ddl-auto=validate`.
+
+El login usa el nombre de cuenta en minúsculas como sujeto de los JWT nuevos.
+FastAPI compara el propietario guardado de forma exacta. Las ventas y los
+compradores históricos cuyo propietario contenga mayúsculas pueden quedar
+fuera de los resultados de la cuenta al iniciar sesión de nuevo.
 
 ## A1 y A3 · Crear roles y usuarios
 
