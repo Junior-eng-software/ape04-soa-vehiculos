@@ -70,6 +70,11 @@ def vendedor(usuario):
         raise ApiError(403, "SIN_PERMISO", "Se requiere OPERADOR o ADMIN")
 
 
+def exigir_admin(usuario):
+    if "ROLE_ADMIN" not in usuario["roles"]:
+        raise ApiError(403, "SIN_PERMISO", "Se requiere ADMIN")
+
+
 def autorizar_venta(usuario=Depends(identidad)):
     vendedor(usuario)
     permisos = usuario.get("permisos")

@@ -9,6 +9,7 @@ GRANT SELECT, INSERT ON venta_vehiculos.roles TO ape04_java_runtime;
 GRANT SELECT, INSERT, UPDATE ON venta_vehiculos.reservas TO ape04_java_runtime;
 GRANT SELECT ON venta_vehiculos.historial_precios TO ape04_java_runtime;
 GRANT SELECT, INSERT ON ventas_api.compradores TO ape04_ventas_runtime;
+-- La anulacion bloquea y actualiza ventas. Conserva su fila y no requiere DELETE.
 GRANT SELECT, INSERT, UPDATE ON ventas_api.ventas TO ape04_ventas_runtime;
 -- DBA: crear dos cuentas privadas nuevas con contrasenas seguras fuera del repositorio.
 -- Asignar UN rol a cada cuenta y establecerlo como DEFAULT ROLE.

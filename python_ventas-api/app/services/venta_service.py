@@ -101,6 +101,7 @@ def crear(datos, clave, usuario):
             raise ApiError(409, "CLAVE_REUTILIZADA",
                            # Explica al cliente por qué se rechazó reutilizar la clave.
                            "La misma clave requiere el mismo cuerpo")
+        rechazar_replay_anulacion(v)
         # Conserva el ID antes de cerrar la sesión.
         id = v.id
     # Solicita a Java reservar o confirmar la operación de forma recuperable.
@@ -111,6 +112,7 @@ def crear(datos, clave, usuario):
     with SessionLocal() as db:
         # Recarga la venta para devolver su estado actualizado.
         v = db.get(Venta, id)
+        rechazar_replay_anulacion(v)
         # Distingue un rechazo definitivo de una operación pendiente.
         if v.estado == "FALLIDA":
             # Entrega a Postman el rechazo procedente de la regla Java.
@@ -123,6 +125,64 @@ def crear(datos, clave, usuario):
         return salida(v), status
 
 
+def rechazar_replay_anulacion(v):
+    if v.estado == "ANULADA":
+        raise ApiError(409, "VENTA_ANULADA", "La venta fue anulada. Para revender, use una operación nueva")
+    if v.estado == "ANULANDO":
+        raise ApiError(409, "ANULACION_PENDIENTE", "La anulación de la venta está pendiente")
+
+
+def registrar_anulacion(v, usuario):
+    v.estado = "ANULADA"
+    v.anulada_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    v.anulada_por = usuario
+
+
+def anular(id, usuario):
+    # Confirmar la intención antes de contactar a Java. Una caída deja un reintento recuperable.
+    with SessionLocal.begin() as db:
+        v = VentaRepository(db).bloquear(id)
+        if v is None:
+            raise ApiError(404, "VENTA_NO_EXISTE", "Venta inexistente")
+        if v.estado == "ANULADA":
+            return 204
+        if v.estado == "FALLIDA":
+            registrar_anulacion(v, usuario)
+            return 204
+        if v.estado not in ("COMPLETADA", "ANULANDO"):
+            raise ApiError(409, "VENTA_NO_ANULABLE", "La venta sigue pendiente o en revisión")
+        if not v.reserva_id:
+            raise ApiError(409, "VENTA_SIN_RESERVA", "La venta no tiene una reserva asociada")
+        v.estado = "ANULANDO"
+
+    # Serializar la llamada y su resultado con otros DELETE. Java repite por ID de reserva.
+    with SessionLocal.begin() as db:
+        v = VentaRepository(db).bloquear(id)
+        if v.estado == "ANULADA":
+            return 204
+        if v.estado != "ANULANDO":
+            raise ApiError(409, "ANULACION_RECHAZADA", "La anulación concurrente fue rechazada")
+        try:
+            reserva = remote.anular(v.reserva_id)
+        except FalloRemoto as rechazo:
+            # Estos errores explícitos del controlador descartan que la reserva esté anulada.
+            if (rechazo.status, rechazo.codigo) not in {
+                (404, "RESERVA_NO_ENCONTRADA"), (409, "CONFLICTO_RESERVA"),
+            }:
+                return 202
+            v.estado = "COMPLETADA"
+            error = ApiError(rechazo.status, rechazo.codigo, rechazo.detalle)
+        else:
+            if (not isinstance(reserva, dict) or reserva.get("estado") != "ANULADA"
+                    or reserva.get("id") != v.reserva_id or reserva.get("operacionId") != v.operacion_id
+                    or reserva.get("vehiculoId") != v.vehiculo_id):
+                return 202
+            registrar_anulacion(v, usuario)
+            return 204
+    # Devolver el rechazo solo después de confirmar la restauración local.
+    raise error
+
+
 # Concilia una venta local con las reservas del servicio Java.
 def procesar(id):
     # Bloqueo por venta: solicitudes y trabajador no la procesan a la vez.
@@ -131,7 +191,7 @@ def procesar(id):
         # Obtiene la venta con bloqueo SQL para evitar procesamiento concurrente.
         v = VentaRepository(db).bloquear(id)
         # Si no existe, preparará una nueva operación.
-        if v is None or v.estado in ("COMPLETADA", "FALLIDA"):
+        if v is None or v.estado not in ("PENDIENTE", "EN_REVISION"):
             # Finaliza inmediatamente porque ya no hay trabajo pendiente.
             return
         # Empieza una sección controlada para recuperar los errores esperados.

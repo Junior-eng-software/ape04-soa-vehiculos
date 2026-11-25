@@ -10,7 +10,7 @@ from app.db import SessionLocal
 from app.models import Venta, Comprador
 from app.repositories.venta_repository import VentaRepository
 from app.schemas import CompradorResumen, CrearVenta, CrearComprador, VentaResumen
-from app.security import autorizar_venta, filtrar_visibles, identidad, propietario, vendedor
+from app.security import autorizar_venta, exigir_admin, filtrar_visibles, identidad, propietario, vendedor
 from app.errors import ApiError, conflicto_comprador, restriccion_duplicada
 from app.services import venta_service as service
 # Crea el agrupador de rutas HTTP con prefijo /api.
@@ -69,11 +69,13 @@ def crear(d: CrearVenta, response: Response,
 
 
 @router.get("/ventas", response_model=list[VentaResumen])
-def listar_ventas(u=Depends(identidad)):
+def listar_ventas(incluirAnuladas: bool = False, u=Depends(identidad)):
     if not {"ROLE_CONSULTA", "ROLE_OPERADOR", "ROLE_ADMIN"}.intersection(u["roles"]):
         raise ApiError(403, "SIN_PERMISO", "Se requiere CONSULTA, OPERADOR o ADMIN")
+    if incluirAnuladas:
+        exigir_admin(u)
     with SessionLocal() as db:
-        filas = VentaRepository(db).listar_visibles(u)
+        filas = VentaRepository(db).listar_visibles(u, incluirAnuladas)
         return [
             VentaResumen(
                 id=v.id, vehiculoId=v.vehiculo_id, compradorId=v.comprador_id,
@@ -101,3 +103,10 @@ def obtener(id: int, u=Depends(identidad)):
         propietario(u, v.usuario)
         # Devuelve el mismo formato JSON que POST.
         return service.salida(v)
+
+
+@router.delete("/ventas/{id}", status_code=204, responses={202: {"description": "Anulación pendiente"}})
+def anular(id: int, u=Depends(identidad)):
+    exigir_admin(u)
+    codigo = service.anular(id, u["usuario"])
+    return Response(status_code=codigo, headers={"Location": f"/api/ventas/{id}"} if codigo == 202 else None)

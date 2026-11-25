@@ -75,7 +75,7 @@ class Venta(Base):
     idempotency_key: Mapped[str] = mapped_column(String(100))
     # Huella SHA-256 para detectar reutilización de la clave con otro JSON.
     request_hash: Mapped[str] = mapped_column(String(64))
-    # Estado local de la operación: PENDIENTE, EN_REVISION, COMPLETADA o FALLIDA.
+    # Estado de la creación o la anulación de la venta.
     estado: Mapped[str] = mapped_column(String(20), default="PENDIENTE")
     # UUID de la reserva que creó Java; puede no existir todavía.
     reserva_id: Mapped[str | None] = mapped_column(String(36))
@@ -93,6 +93,8 @@ class Venta(Base):
     fecha: Mapped[datetime] = mapped_column(
         # Genera la fecha actual, guardada sin zona para MySQL.
         default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    anulada_utc: Mapped[datetime | None]
+    anulada_por: Mapped[str | None] = mapped_column(String(100))
     # Relación ORM desde la venta hasta su comprador.
     comprador: Mapped[Comprador] = relationship(back_populates="ventas")
 

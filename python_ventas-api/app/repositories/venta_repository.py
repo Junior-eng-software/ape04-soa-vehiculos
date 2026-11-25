@@ -15,11 +15,13 @@ class VentaRepository:
         # Almacena la sesión para realizar las consultas.
         self.db = db
 
-    def listar_visibles(self, usuario):
+    def listar_visibles(self, usuario, incluir_anuladas=False):
         consulta = select(
             Venta.id, Venta.vehiculo_id, Venta.comprador_id, Venta.estado,
             Venta.precio_acordado, Venta.moneda, Venta.fecha,
         ).order_by(Venta.id)
+        if not incluir_anuladas:
+            consulta = consulta.where(Venta.estado != "ANULADA")
         return self.db.execute(filtrar_visibles(consulta, Venta.usuario, usuario)).all()
 
     # Busca una venta previa perteneciente al usuario y clave indicados.

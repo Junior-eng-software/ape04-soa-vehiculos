@@ -17,6 +17,10 @@ from sqlalchemy.pool import StaticPool
 def sistema(monkeypatch):
     # Arranca con una base SQLite aislada y conexión compartida en memoria.
     engine = sqlalchemy_create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+    return construir_sistema(monkeypatch, engine)
+
+
+def construir_sistema(monkeypatch, engine):
     # La app sigue generando la URL de MySQL, pero para la prueba utiliza SQLite.
     import sqlalchemy
     monkeypatch.setattr(sqlalchemy, 'create_engine', lambda *args, **kwargs: engine)
@@ -32,15 +36,17 @@ def sistema(monkeypatch):
     from app.db import Base
     from app import models
     # Simula una colación que equipara nombres con distintas mayúsculas.
-    for modelo in (models.Comprador, models.Venta):
-        modelo.__table__.c.usuario.type.collation = 'NOCASE'
-    Base.metadata.create_all(engine)
+    if engine.dialect.name == 'sqlite':
+        for modelo in (models.Comprador, models.Venta):
+            modelo.__table__.c.usuario.type.collation = 'NOCASE'
+        Base.metadata.create_all(engine)
     from app.main import app
     import app.services.venta_service as svc
     import app.security as sec
     import app.clients.vehiculos_client as veh
     # Servidor Java simulado con las mismas rutas y estados de reserva del contrato real.
-    estado={'reservas':{},'vehiculos':{1:'DISPONIBLE',2:'DISPONIBLE'},'avisos':[], 'notificaciones_activas':True}
+    estado={'reservas':{},'vehiculos':{1:'DISPONIBLE',2:'DISPONIBLE'},'avisos':[], 'notificaciones_activas':True,
+            'anulaciones': []}
     def identidad(url, **kw):
         assert url.endswith('/api/identidad')
         auth = kw['headers']['Authorization']
@@ -79,6 +85,18 @@ def sistema(monkeypatch):
             reserva=route.split('/')[3];r=estado['reservas'][reserva]
             r['estado']='CONFIRMADA';estado['vehiculos'][r['vehiculoId']]='VENDIDO'
             return httpx.Response(200,json=r)
+        if method == 'PUT' and route.endswith('/anulacion'):
+            reserva = route.split('/')[3]
+            estado['anulaciones'].append(reserva)
+            r = estado['reservas'].get(reserva)
+            if r is None:
+                return httpx.Response(404, json={'codigo': 'RESERVA_NO_ENCONTRADA'})
+            if r['estado'] != 'ANULADA':
+                if r['estado'] != 'CONFIRMADA' or estado['vehiculos'][r['vehiculoId']] != 'VENDIDO':
+                    return httpx.Response(409, json={'codigo': 'CONFLICTO_RESERVA'})
+                r['estado'] = 'ANULADA'
+                estado['vehiculos'][r['vehiculoId']] = 'DISPONIBLE'
+            return httpx.Response(200, json=r)
         raise AssertionError(f'Ruta inesperada: {method} {route}')
     def avisar(url,**kw):
         assert kw['headers']['X-Notification-Key']=='clave_prueba_notif_con_32_caracteres_123'

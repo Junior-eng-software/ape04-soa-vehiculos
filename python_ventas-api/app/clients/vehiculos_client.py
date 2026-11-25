@@ -9,9 +9,10 @@ from app.config import JAVA_URL, SERVICE_KEY
 class FalloRemoto(Exception):
 
     # Memoriza código HTTP y explicación del fallo remoto.
-    def __init__(self, status, detalle):
+    def __init__(self, status, detalle, codigo=None):
         # Deja disponibles el estado y el detalle para el Service.
         self.status, self.detalle = status, detalle
+        self.codigo = codigo
 
 
 # Cliente concentrado en llamadas a los endpoints internos de reservas.
@@ -34,7 +35,12 @@ class VehiculosClient:
         # Traduce cualquier rechazo HTTP de Java a FalloRemoto.
         if r.status_code >= 400:
             # Conserva el estado del rechazo para distinguir 404/409 de 503.
-            raise FalloRemoto(r.status_code, "Operación Java rechazada")
+            try:
+                problema = r.json()
+            except ValueError:
+                problema = None
+            codigo = problema.get("codigo") if isinstance(problema, dict) else None
+            raise FalloRemoto(r.status_code, "Operación Java rechazada", codigo if isinstance(codigo, str) else None)
         # Empieza una sección controlada para recuperar los errores esperados.
         try:
             # Devuelve el cuerpo JSON de la respuesta si existe.
@@ -62,3 +68,6 @@ class VehiculosClient:
     def confirmar(self, reserva):
         # Devuelve el valor indicado a la función que realizó la llamada.
         return self.llamar("PUT", f"/api/reservas/{reserva}/confirmacion")
+
+    def anular(self, reserva):
+        return self.llamar("PUT", f"/api/reservas/{reserva}/anulacion")
