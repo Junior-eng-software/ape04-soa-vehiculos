@@ -12,7 +12,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=8" />
+    <link rel="stylesheet" href="/styles.css?v=9" />
   </head>
   <body>
     <div class="app">
@@ -20,7 +20,7 @@
         <div class="logo" aria-hidden="true">🚙</div>
         <h1>Gestión automotriz</h1>
         <div id="sesion-activa" class="sesion-cabecera" hidden>
-          <span>Sesión activa</span>
+          <span id="perfil-sesion"></span>
           <button id="cerrar-sesion" class="boton-discreto" type="button">Cerrar sesión</button>
         </div>
       </header>
@@ -39,6 +39,48 @@
           </form>
           <div id="mensaje" class="mensaje neutro" role="status" aria-live="polite">Preparando el inicio de sesión…</div>
           <noscript><p class="mensaje error">Active JavaScript y vuelva a cargar la aplicación para iniciar sesión.</p></noscript>
+        </section>
+
+        <section id="panel-administracion" class="panel" aria-labelledby="titulo-administracion" hidden>
+          <div class="seccion-cabecera resultados">
+            <h2 id="titulo-administracion">Administración</h2>
+            <button id="actualizar-administracion" class="boton-discreto boton-compacto" type="button">Actualizar listas</button>
+          </div>
+          <div class="formularios-administracion">
+            <form id="formulario-usuario" method="post">
+              <h3>Crear usuario</h3>
+              <label for="usuario-nuevo">Usuario</label>
+              <input id="usuario-nuevo" maxlength="50" autocomplete="off" autocapitalize="none" spellcheck="false" required />
+              <label for="clave-usuario-nuevo">Contraseña</label>
+              <input id="clave-usuario-nuevo" type="password" autocomplete="new-password" minlength="8" required />
+              <label for="rol-usuario-nuevo">Rol</label>
+              <select id="rol-usuario-nuevo" required><option value="">Seleccione un rol</option></select>
+              <div class="acciones"><button id="crear-usuario" class="boton-primario" type="submit" disabled>Crear usuario</button></div>
+            </form>
+            <form id="formulario-clave" method="post">
+              <h3>Restablecer contraseña</h3>
+              <label for="usuario-restablecer">Usuario</label>
+              <select id="usuario-restablecer" required><option value="">Seleccione un usuario</option></select>
+              <label for="clave-restablecer">Nueva contraseña</label>
+              <input id="clave-restablecer" type="password" autocomplete="new-password" minlength="8" required />
+              <div class="acciones"><button id="restablecer-clave" class="boton-primario" type="submit" disabled>Restablecer contraseña</button></div>
+            </form>
+            <form id="formulario-rol" method="post">
+              <h3>Crear rol</h3>
+              <label for="nombre-rol">Nombre del rol</label>
+              <input id="nombre-rol" pattern="[A-Z0-9_]{3,30}" maxlength="30" autocapitalize="characters" spellcheck="false"
+                title="Entre 3 y 30 caracteres: mayúsculas, números o guion bajo." required />
+              <label for="base-rol">Perfil base</label>
+              <select id="base-rol" required>
+                <option value="">Seleccione un perfil base</option>
+                <option>CONSULTA</option><option>OPERADOR</option><option>ADMIN</option>
+              </select>
+              <label for="descripcion-rol">Descripción</label>
+              <input id="descripcion-rol" maxlength="255" />
+              <div class="acciones"><button id="crear-rol" class="boton-primario" type="submit">Crear rol</button></div>
+            </form>
+          </div>
+          <div id="mensaje-administracion" class="mensaje neutro" role="status" hidden></div>
         </section>
 
         <section id="panel-venta" class="panel" aria-labelledby="titulo-venta" hidden>
@@ -108,7 +150,7 @@
     </div>
     <script type="module">
       const mensaje = document.querySelector('#mensaje');
-      import('/main.js?v=8').then(() => {
+      import('/main.js?v=9').then(() => {
         mensaje.textContent = 'Ingrese sus credenciales para continuar.';
         document.querySelector('#ingresar').disabled = false;
       }).catch(() => {

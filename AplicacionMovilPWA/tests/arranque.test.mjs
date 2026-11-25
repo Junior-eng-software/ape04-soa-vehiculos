@@ -21,8 +21,8 @@ test('Service Worker instala una versión coherente y deja pasar solicitudes pro
       addEventListener: (nombre, listener) => { eventos[nombre] = listener; },
     },
     caches: {
-      open: async (nombre) => { assert.equal(nombre, 'vehiculos-pwa-v8'); return cache; },
-      keys: async () => ['vehiculos-pwa-v7', 'vehiculos-pwa-v8', 'otra-app'],
+      open: async (nombre) => { assert.equal(nombre, 'vehiculos-pwa-v9'); return cache; },
+      keys: async () => ['vehiculos-pwa-v8', 'vehiculos-pwa-v9', 'otra-app'],
       delete: async (nombre) => { eliminados.push(nombre); },
     },
   });
@@ -42,10 +42,11 @@ test('Service Worker instala una versión coherente y deja pasar solicitudes pro
   }
   eventos.activate({ waitUntil: (promesa) => { tarea = promesa; } });
   await tarea;
-  assert.deepEqual(eliminados, ['vehiculos-pwa-v7']);
+  assert.deepEqual(eliminados, ['vehiculos-pwa-v8']);
 
   for (const [ruta, opciones] of [
     ['/api/login', { method: 'POST' }], ['/api/ventas/19'], ['/ventas.js?v=4'],
+    ['/api/identidad'], ['/api/usuarios'], ['/api/roles'], ['/api/usuarios/1/clave', { method: 'PUT' }],
     ['/ventas.js?v=5', { headers: { Authorization: 'Bearer simulado' } }],
   ]) {
     eventos.fetch({ request: new Request(origen + ruta, opciones), respondWith: () => assert.fail(ruta) });
@@ -60,6 +61,7 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
   const controles = new Map(Array.from(html.matchAll(/\bid="([\w-]+)"/g), ([, id]) => [id, {
     value: '', eventos: {}, options: [], hijos: [], reset() {}, focus() {},
     append(...hijos) { this.hijos.push(...hijos); },
+    add(opcion) { this.options.push(opcion); },
     replaceChildren(...opciones) { this.options = opciones; this.hijos = []; this.value = ''; },
     get selectedOptions() { return this.options.filter((opcion) => opcion.value === this.value); },
     addEventListener(nombre, listener) { this.eventos[nombre] = listener; },
@@ -80,7 +82,7 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
     t.after(() => { delete globalThis[nombre]; });
   }
   const fetchSimulado = t.mock.method(globalThis, 'fetch', () => Response.json({}, { status: 401 }));
-  await import('../public/main.js?v=8');
+  await import('../public/main.js?v=9');
   const enviar = () => {
     buscar('usuario').value = 'persona';
     buscar('clave').value = 'clave simulada';
@@ -94,7 +96,11 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
   assert.match(buscar('mensaje').textContent, /Usuario o contraseña no válidos/);
   assert.equal(buscar('ingresar').disabled, false);
 
-  fetchSimulado.mock.mockImplementation(() => Response.json({ access_token: 'token.simulado.firma', expires_in: 5 }));
+  const identidad = (base, rolNombre = base) => Response.json({
+    usuario: 'persona', roles: ['ROLE_' + base], rolNombre,
+  });
+  fetchSimulado.mock.mockImplementation((ruta) => ruta === '/api/identidad' ? identidad('OPERADOR')
+    : Response.json({ access_token: 'token.simulado.firma', expires_in: 5 }));
   t.mock.method(buscar('actualizar-listas'), 'focus', () => { throw new Error('detalle interno de prueba'); });
   await enviar();
   assert.match(buscar('mensaje').textContent, /No se pudo iniciar la sesión en la aplicación/);
@@ -106,6 +112,8 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
   const envios = [];
   const lecturasEstado = [];
   const rutas = [];
+  let rolActivo = 'OPERADOR';
+  const solicitudesAdmin = [];
   let modoListas = 'parcial';
   let resolverVehiculos;
   let resolverCompradores;
@@ -126,6 +134,7 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
   t.mock.method(globalThis, 'fetch', async (ruta, opciones) => {
     rutas.push(ruta);
     if (ruta === '/api/login') return Response.json({ access_token: 'token.simulado.firma', expires_in: 5 });
+    if (ruta === '/api/identidad') return identidad(rolActivo, rolActivo === 'OPERADOR' ? 'VENDEDOR' : rolActivo);
     if (modoListas === 'cerrando') await esperaCierre;
     if (ruta === '/api/vehiculos') {
       assert.equal(opciones.headers.get('Authorization'), 'Bearer token.simulado.firma');
@@ -133,6 +142,20 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
       return Response.json(catalogoRespuesta);
     }
     assert.equal(opciones.headers.Authorization, 'Bearer token.simulado.firma');
+    if (ruta === '/api/roles' || ruta.startsWith('/api/usuarios')) {
+      solicitudesAdmin.push([ruta, opciones.method]);
+      if (opciones.method === 'GET') return Response.json(ruta === '/api/roles'
+        ? [{ nombre: 'CONSULTA' }, { nombre: 'OPERADOR' }]
+        : [{ id: 1, username: 'persona', rol: 'ADMIN' }]);
+      const datos = JSON.parse(opciones.body);
+      if (ruta === '/api/roles') return Response.json({ nombre: datos.nombre }, { status: 201 });
+      if (opciones.method === 'POST') {
+        assert.equal(datos.rol, 'VENDEDOR');
+        return Response.json({ id: 2, username: datos.username, rol: datos.rol }, { status: 201 });
+      }
+      assert.equal(ruta, '/api/usuarios/2/clave');
+      return new Response(null, { status: 204 });
+    }
     if (ruta === '/api/compradores') {
       if (modoListas === 'parcial') {
         await esperaCompradores;
@@ -158,7 +181,7 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
   const limpiar = buscar('limpiar-seleccion');
   const acceso = enviar();
   await new Promise((resolver) => setImmediate(resolver));
-  assert.deepEqual(rutas, ['/api/login', '/api/vehiculos', '/api/compradores']);
+  assert.deepEqual(rutas, ['/api/login', '/api/identidad', '/api/vehiculos', '/api/compradores']);
   assert.deepEqual([vehiculo.options[0].text, comprador.options[0].text], ['Cargando...', 'Cargando...']);
   resolverCompradores();
   await new Promise((resolver) => setImmediate(resolver));
@@ -166,6 +189,7 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
   assert.equal(vehiculo.options[0].text, 'Cargando...');
   resolverVehiculos();
   await acceso;
+  assert.equal(buscar('perfil-sesion').textContent, 'persona · VENDEDOR');
   assert.equal(buscar('panel-estado-venta').hidden, false);
   assert.deepEqual(vehiculo.options.map(({ value }) => value), ['', '44', '45']);
   assert.match(buscar('estado-lista-vehiculos').textContent, /2 vehículos disponibles/);
@@ -278,4 +302,43 @@ test('controlador conserva la sesión, separa compradores homónimos y bloquea l
   assert.equal(buscar('panel-estado-venta').hidden, true);
   assert.equal(buscar('panel-catalogo').hidden, true);
   assert.deepEqual([vehiculo.options.length, comprador.options.length], [1, 1]);
+
+  modoListas = 'normal';
+  rolActivo = 'CONSULTA';
+  const inicioConsulta = rutas.length;
+  await enviar();
+  assert.equal(buscar('panel-administracion').hidden, true);
+  assert.deepEqual(rutas.slice(inicioConsulta), ['/api/login', '/api/identidad', '/api/vehiculos']);
+  assert.ok(vehiculo.disabled && comprador.disabled && buscar('registrar-venta').disabled);
+  assert.match(buscar('mensaje-venta').textContent, /CONSULTA no puede registrar ventas/);
+  seleccionar('44', '1');
+  await registrar();
+  assert.equal(envios.length, 4);
+  buscar('cerrar-sesion').eventos.click();
+
+  rolActivo = 'ADMIN';
+  await enviar();
+  assert.equal(buscar('panel-administracion').hidden, false);
+  const enviarAdmin = (id) => buscar(id).eventos.submit({ preventDefault() {} });
+  buscar('nombre-rol').value = 'VENDEDOR';
+  buscar('base-rol').value = 'OPERADOR';
+  await enviarAdmin('formulario-rol');
+  assert.ok(buscar('rol-usuario-nuevo').options.some(({ value }) => value === 'VENDEDOR'));
+  buscar('usuario-nuevo').value = 'vendedor_demo';
+  buscar('rol-usuario-nuevo').value = 'VENDEDOR';
+  buscar('clave-usuario-nuevo').value = crypto.randomUUID();
+  await enviarAdmin('formulario-usuario');
+  assert.equal(buscar('clave-usuario-nuevo').value, '');
+  assert.deepEqual(buscar('usuario-restablecer').options.map(({ value }) => value), ['', '2']);
+  buscar('usuario-restablecer').value = '2';
+  buscar('clave-restablecer').value = crypto.randomUUID();
+  await enviarAdmin('formulario-clave');
+  assert.equal(buscar('clave-restablecer').value, '');
+  assert.match(buscar('mensaje-administracion').textContent, /Clave restablecida/);
+  assert.deepEqual(solicitudesAdmin, [
+    ['/api/roles', 'GET'], ['/api/usuarios', 'GET'], ['/api/roles', 'POST'],
+    ['/api/usuarios', 'POST'], ['/api/usuarios/2/clave', 'PUT'],
+  ]);
+  buscar('cerrar-sesion').eventos.click();
+  assert.equal(buscar('panel-administracion').hidden, true);
 });

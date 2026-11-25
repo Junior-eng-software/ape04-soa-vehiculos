@@ -25,7 +25,7 @@ label { display: block; font-weight: 700; font-size: 13px; margin-bottom: 8px; }
 .fila-token { display: flex; gap: 8px; }
 input { width: 100%; min-width: 0; flex: 1; border: 1px solid #becdd5; padding: 12px; border-radius: 11px; background: #fcfeff; color: #15354a; }
 .opciones-venta { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }
-.opciones-venta select, .filtros-campos select { width: 100%; min-width: 0; padding: 10px; font: inherit; border: 1px solid #becdd5; border-radius: 11px; }
+.opciones-venta select, .filtros-campos select, .formularios-administracion select { width: 100%; min-width: 0; padding: 10px; font: inherit; border: 1px solid #becdd5; border-radius: 11px; }
 .opciones-venta > div { min-width: 0; }
 .estado-lista { margin: 6px 0 0; font-size: 13px; color: #47616f; }
 .estado-lista.error { color: #9a2f2f; }
@@ -39,6 +39,9 @@ button { border-radius: 11px; min-height: 43px; padding: 10px 14px; font-weight:
 .acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .acciones[hidden] { display: none; }
 #formulario-estado-venta { margin-top: 12px; }
+.formularios-administracion { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 20px; }
+.formularios-administracion h3 { margin: 12px 0; font-size: 1rem; }
+.formularios-administracion label:not(:first-of-type) { margin-top: 10px; }
 .acciones-estado-venta { margin-top: 0; }
 .acciones-estado-venta input { flex-basis: 8rem; }
 .mensaje { padding: 12px; border-radius: 10px; font-size: 13px; line-height: 1.4; margin-top: 14px; border: 1px solid; }

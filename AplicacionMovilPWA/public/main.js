@@ -1,4 +1,5 @@
-import { ErrorAcceso, iniciarSesion, listarVehiculos } from './api.js?v=5';
+import { ErrorAcceso, iniciarSesion, listarVehiculos, solicitarApi } from './api.js?v=6';
+import { crearAdministracion } from './administracion.js?v=1';
 import { crearSesion } from './sesion.js?v=5';
 import { consultarVenta, crearRegistroVenta, listarCompradores } from './ventas.js?v=5';
 
@@ -9,6 +10,7 @@ const campoClave = document.querySelector('#clave');
 const botonIngresar = document.querySelector('#ingresar');
 const panelAcceso = document.querySelector('#panel-acceso');
 const panelSesion = document.querySelector('#sesion-activa');
+const perfilSesion = document.querySelector('#perfil-sesion');
 const panelCatalogo = document.querySelector('#panel-catalogo');
 const botonCerrar = document.querySelector('#cerrar-sesion');
 const mensaje = document.querySelector('#mensaje');
@@ -45,7 +47,9 @@ const fechaComercial = new Intl.DateTimeFormat('es-EC', {
   dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Guayaquil',
 });
 const sesion = crearSesion();
+const administracion = crearAdministracion(sesionVencida);
 const registro = crearRegistroVenta();
+let puedeVender = false;
 let solicitud;
 let temporizador;
 let idVentaReciente;
@@ -158,9 +162,9 @@ function actualizarAcciones() {
   const ocupado = Boolean(solicitud);
   const pendiente = registro.pendiente();
   botonActualizarListas.disabled = ocupado || pendiente;
-  selectorVehiculo.disabled = selectorComprador.disabled = ocupado || pendiente;
-  botonLimpiarSeleccion.disabled = ocupado || pendiente || (!selectorVehiculo.value && !selectorComprador.value);
-  botonVenta.disabled = ocupado || !selectorVehiculo.value || !selectorComprador.value;
+  selectorVehiculo.disabled = selectorComprador.disabled = !puedeVender || ocupado || pendiente;
+  botonLimpiarSeleccion.disabled = !puedeVender || ocupado || pendiente || (!selectorVehiculo.value && !selectorComprador.value);
+  botonVenta.disabled = !puedeVender || ocupado || !selectorVehiculo.value || !selectorComprador.value;
   botonVenta.textContent = pendiente ? 'Reintentar misma venta' : 'Registrar venta';
   campoEstadoVenta.disabled = botonEstadoVenta.disabled = botonVentaReciente.disabled = ocupado;
 }
@@ -240,6 +244,9 @@ function cerrarSesion(texto, tipo = 'neutro') {
   solicitud = null;
   clearTimeout(temporizador);
   sesion.cerrar();
+  administracion.cerrar();
+  puedeVender = false;
+  perfilSesion.textContent = '';
   registro.limpiar();
   formulario.reset();
   mostrarSesionActiva(false);
@@ -269,7 +276,7 @@ formulario.addEventListener('submit', async (evento) => {
   evento.preventDefault();
   if (solicitud) return;
   let actual;
-  let accesoValido = false;
+  let perfil;
 
   try {
     const usuario = campoUsuario.value.trim();
@@ -286,16 +293,32 @@ formulario.addEventListener('submit', async (evento) => {
     const { jwt, segundos } = await acceso;
     if (actual.signal.aborted) return;
     sesion.guardar(jwt, segundos);
+    const venceEn = Date.now() + segundos * 1000;
+    const identidad = await solicitarApi('/api/identidad', jwt, actual.signal);
+    if (actual.signal.aborted) return;
+    if (!sesion.leer()) return sesionVencida();
+    const base = identidad?.roles?.[0];
+    if (!['ROLE_CONSULTA', 'ROLE_OPERADOR', 'ROLE_ADMIN'].includes(base)
+        || !identidad.usuario || typeof identidad.usuario !== 'string'
+        || !identidad.rolNombre || typeof identidad.rolNombre !== 'string') {
+      throw new ErrorAcceso('El servidor devolvió una identidad inválida.');
+    }
+    puedeVender = base !== 'ROLE_CONSULTA';
+    perfilSesion.textContent = `${identidad.usuario} · ${identidad.rolNombre}`;
     formulario.reset();
     mostrarSesionActiva(true);
+    mostrarVenta(puedeVender ? '' : 'El perfil CONSULTA no puede registrar ventas.', 'aviso');
     botonActualizarListas.focus();
-    temporizador = setTimeout(sesionVencida, segundos * 1000);
-    accesoValido = true;
+    temporizador = setTimeout(sesionVencida, Math.max(0, venceEn - Date.now()));
+    perfil = { jwt, base, usuario: identidad.usuario };
   } catch (error) {
     if (actual?.signal.aborted) return;
     sesion.cerrar();
+    puedeVender = false;
+    perfilSesion.textContent = '';
     clearTimeout(temporizador);
-    mostrarMensaje(error instanceof ErrorAcceso ? error.message
+    mostrarMensaje(error.codigoHttp === 403 ? 'HTTP 403: No tiene permiso para consultar su identidad.'
+      : error instanceof ErrorAcceso ? error.message
       : 'No se pudo iniciar la sesión en la aplicación. Vuelva a intentarlo.', 'error');
     mostrarSesionActiva(false);
   } finally {
@@ -304,7 +327,10 @@ formulario.addEventListener('submit', async (evento) => {
       botonIngresar.disabled = false;
     }
   }
-  if (accesoValido) await actualizarListas();
+  if (perfil) await Promise.all([
+    actualizarListas(),
+    perfil.base === 'ROLE_ADMIN' && administracion.abrir(perfil.jwt, perfil.usuario),
+  ]);
 });
 
 function informarDisponibles(cantidad) {
@@ -373,7 +399,10 @@ async function actualizarListas() {
   solicitud = actual;
   actualizarAcciones();
   try {
-    await Promise.all([cargarVehiculos(jwt, actual.signal), cargarCompradores(jwt, actual.signal)]);
+    await Promise.all([
+      cargarVehiculos(jwt, actual.signal),
+      puedeVender && cargarCompradores(jwt, actual.signal),
+    ]);
   } finally {
     if (solicitud === actual) {
       solicitud = null;
@@ -444,7 +473,7 @@ formularioVenta.addEventListener('submit', async (evento) => {
   evento.preventDefault();
   const jwt = sesion.leer();
   if (!jwt) return sesionVencida();
-  if (solicitud || !selectorVehiculo.value || !selectorComprador.value) return;
+  if (!puedeVender || solicitud || !selectorVehiculo.value || !selectorComprador.value) return;
 
   if (!registro.pendiente()) recordarIdVenta();
   const datos = { vehiculoId: Number(selectorVehiculo.value), compradorId: Number(selectorComprador.value) };

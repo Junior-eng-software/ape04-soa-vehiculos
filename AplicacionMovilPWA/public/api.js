@@ -9,6 +9,24 @@ export function normalizarToken(entrada = '') {
 
 export class ErrorAcceso extends Error {}
 
+export async function solicitarApi(ruta, jwt, signal, method = 'GET', datos) {
+  const respuesta = await fetch(ruta, {
+    method, signal, cache: 'no-store', redirect: 'error',
+    headers: {
+      Authorization: 'Bearer ' + jwt,
+      Accept: 'application/json',
+      ...(datos !== undefined && { 'Content-Type': 'application/json' }),
+    },
+    ...(datos !== undefined && { body: JSON.stringify(datos) }),
+  });
+  if (!respuesta.ok) {
+    const error = new Error('La solicitud no se pudo completar.');
+    error.codigoHttp = respuesta.status;
+    throw error;
+  }
+  if (respuesta.status !== 204) return respuesta.json();
+}
+
 export async function iniciarSesion(username, password, ejecutarFetch = fetch, signal) {
   const solicitud = new AbortController();
   const cancelar = () => solicitud.abort();
