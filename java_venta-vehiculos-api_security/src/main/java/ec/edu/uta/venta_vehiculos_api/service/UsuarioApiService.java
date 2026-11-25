@@ -32,7 +32,9 @@ public class UsuarioApiService {
         this.passwordEncoder = passwordEncoder;
     }
 
-    public Rol autenticar(
+    public record UsuarioAutenticado(String username, Rol rol) {}
+
+    public UsuarioAutenticado autenticar(
             String username,
             String password) {
 
@@ -53,7 +55,7 @@ public class UsuarioApiService {
             );
         }
 
-        return resolverRol(usuario.getRol());
+        return new UsuarioAutenticado(usuario.getUsername().toLowerCase(Locale.ROOT), resolverRol(usuario.getRol()));
     }
 
     public Rol rolDeUsuario(String username) {

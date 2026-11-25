@@ -20,8 +20,8 @@ import org.springframework.web.bind.annotation.RestController;
 import ec.edu.uta.venta_vehiculos_api.dto.TokenResponse;
 import ec.edu.uta.venta_vehiculos_api.security.JwtService;
 
-import ec.edu.uta.venta_vehiculos_api.model.Rol;
 import ec.edu.uta.venta_vehiculos_api.service.UsuarioApiService;
+import ec.edu.uta.venta_vehiculos_api.service.UsuarioApiService.UsuarioAutenticado;
 
 
 // Indica que esta clase es un controlador REST.
@@ -267,10 +267,10 @@ public class AuthController {
         // No debe confundirse con las credenciales
         // del cliente enviadas mediante Basic Auth.
         
-        Rol perfil;
+        UsuarioAutenticado autenticado;
         try {
 
-        perfil =
+        autenticado =
                 usuarioApiService.autenticar(
                         username,
                         password
@@ -295,6 +295,7 @@ public class AuthController {
 
 
         String scopeBase = "vehiculos";
+        var perfil = autenticado.rol();
         String rol = perfil.getRolBase();
         String scope = scopeBase;
         if (cliente == Cliente.PWA && ("OPERADOR".equals(rol) || "ADMIN".equals(rol))) {
@@ -323,7 +324,7 @@ public class AuthController {
                 jwtService.generarAccessToken(
 
                         // Usuario autenticado.
-                        username,
+                        autenticado.username(),
 
                         // Identificador de aplicación.
                         idAplicacion,
@@ -341,7 +342,7 @@ public class AuthController {
                 jwtService.generarRefreshToken(
 
                         // Usuario.
-                        username,
+                        autenticado.username(),
 
                         // Identificador de aplicación.
                         idAplicacion,
