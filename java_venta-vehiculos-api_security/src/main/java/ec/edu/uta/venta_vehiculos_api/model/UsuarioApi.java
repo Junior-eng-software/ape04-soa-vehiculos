@@ -10,13 +10,13 @@ public class UsuarioApi {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    @Column(nullable = false, unique = true)
+    @Column(length = 50, nullable = false, unique = true)
     private String username;
 
     @Column(nullable = false)
     private String password;
 
-    @Column(nullable = false)
+    @Column(length = 30, nullable = false)
     private String rol;
 
     public UsuarioApi() {

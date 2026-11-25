@@ -57,6 +57,8 @@ public class SecurityConfig {
      "/api/vehiculos/*/reservas").hasRole("SERVICIO_VENTAS")
     .requestMatchers("/api/identidad")
      .hasAnyRole("CONSULTA","OPERADOR","ADMIN")
+    .requestMatchers("/api/usuarios", "/api/usuarios/*/clave", "/api/roles")
+     .hasRole("ADMIN")
     .requestMatchers(HttpMethod.GET,"/api/vehiculos/**")
      .hasAnyRole("CONSULTA","OPERADOR","ADMIN")
     .requestMatchers(HttpMethod.POST,"/api/vehiculos/**")

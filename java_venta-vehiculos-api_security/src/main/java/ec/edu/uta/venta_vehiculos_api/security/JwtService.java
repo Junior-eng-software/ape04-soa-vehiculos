@@ -74,7 +74,8 @@ public class JwtService {
             String username,
             String idapli,
             String scope,
-            String rol) {
+            String rol,
+            String rolNombre) {
 
         // No genera directamente todo el JWT.
         // Reutiliza el método privado generarToken().
@@ -89,6 +90,7 @@ public class JwtService {
                 // Permiso asociado al token.
                 scope,
                 rol,
+                rolNombre,
 
                 // Tiempo de duración configurado para el Access Token.
                 accessTokenMinutes,
@@ -107,7 +109,8 @@ public class JwtService {
             String username,
             String idapli,
             String scope,
-            String rol) {
+            String rol,
+            String rolNombre) {
 
         // También reutiliza generarToken().
         return generarToken(
@@ -121,6 +124,7 @@ public class JwtService {
                 // Scope o permiso.
                 scope,
                 rol,
+                rolNombre,
 
                 // En este caso utiliza el tiempo configurado
                 // específicamente para el Refresh Token.
@@ -141,6 +145,7 @@ public class JwtService {
             String idapli,   // Identificador de la aplicación.
             String scope,    // Permiso del usuario/token.
             String rol,
+            String rolNombre,
             long minutos,    // Tiempo de duración.
             String tipo) {   // access o refresh.
 
@@ -196,6 +201,7 @@ public class JwtService {
                         "scope", scope,
                        // Rol de validadicion
                         "rol", rol,
+                        "rolNombre", rolNombre,
 
                         // Guarda el tipo de token.
                         //

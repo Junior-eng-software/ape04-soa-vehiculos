@@ -4,9 +4,10 @@ package ec.edu.uta.venta_vehiculos_api;
 // Importa la clase SpringApplication para permitir el arranque de la aplicación
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
 
 // Habilita la autoconfiguración, el escaneo de paquetes (@ComponentScan) y la configuración de Spring Boot (@Configuration)
-@SpringBootApplication
+@SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)
 // Declaración de la clase principal de la aplicación
 public class VentaVehiculosApiApplication {
 

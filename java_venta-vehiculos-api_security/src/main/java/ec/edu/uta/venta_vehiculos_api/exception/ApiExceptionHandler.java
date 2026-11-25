@@ -24,6 +24,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 
 // Importa anotaciones para manejar excepciones.
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 // Permite consultar información de errores HTTP de Spring.
 import org.springframework.web.ErrorResponse;
@@ -79,6 +80,11 @@ public class ApiExceptionHandler {
                 .orElse("Datos inválidos");
 
         // Comprueba si el JSON recibido es incorrecto.
+        } else if (ex instanceof MethodArgumentTypeMismatchException) {
+            status = 400;
+            codigo = "PARAMETRO_INVALIDO";
+            detalle = "Parámetro de ruta inválido";
+
         } else if (ex instanceof HttpMessageNotReadableException) {
 
             // Devuelve HTTP 400 por una petición mal formada.

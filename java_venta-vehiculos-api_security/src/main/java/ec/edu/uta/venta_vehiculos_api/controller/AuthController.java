@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import ec.edu.uta.venta_vehiculos_api.dto.TokenResponse;
 import ec.edu.uta.venta_vehiculos_api.security.JwtService;
 
-import ec.edu.uta.venta_vehiculos_api.model.UsuarioApi;
+import ec.edu.uta.venta_vehiculos_api.model.Rol;
 import ec.edu.uta.venta_vehiculos_api.service.UsuarioApiService;
 
 
@@ -267,10 +267,10 @@ public class AuthController {
         // No debe confundirse con las credenciales
         // del cliente enviadas mediante Basic Auth.
         
-       UsuarioApi usuario;
+        Rol perfil;
         try {
 
-        usuario =
+        perfil =
                 usuarioApiService.autenticar(
                         username,
                         password
@@ -295,7 +295,7 @@ public class AuthController {
 
 
         String scopeBase = "vehiculos";
-        String rol = usuario.getRol();
+        String rol = perfil.getRolBase();
         String scope = scopeBase;
         if (cliente == Cliente.PWA && ("OPERADOR".equals(rol) || "ADMIN".equals(rol))) {
             scope += " " + JwtService.PERMISO_CREAR_VENTA;
@@ -330,7 +330,8 @@ public class AuthController {
 
                         // Permiso que tendrá el token.
                         scope,
-                        rol
+                        rol,
+                        perfil.getNombre()
                 );
 
 
@@ -347,7 +348,8 @@ public class AuthController {
 
                         // El permiso de venta pertenece al access token.
                         scopeBase,
-                        rol
+                        rol,
+                        perfil.getNombre()
                 );
 
 
