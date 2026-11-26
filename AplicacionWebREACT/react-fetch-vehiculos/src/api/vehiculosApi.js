@@ -10,8 +10,7 @@ export async function listarVehiculos(token, signal) {
   // Headers es el objeto estándar del navegador para cabeceras HTTP.
   const headers = new Headers({ Accept: 'application/json' });
 
-  // Solo se envía Authorization si existe un token escrito por el usuario.
-  // Dejarlo vacío permite comprobar el 401 real del backend.
+  // La sesión proporciona un token en memoria para esta consulta.
   if (token.trim()) {
     headers.set('Authorization', `Bearer ${token.trim()}`);
   }
@@ -36,7 +35,7 @@ export async function listarVehiculos(token, signal) {
   if (!respuesta.ok) {
     const mensajes = {
       401: 'HTTP 401: Falta el JWT o el token ya no es válido.',
-      403: 'HTTP 403: El usuario no tiene permiso para consultar.',
+      403: 'HTTP 403: Acceso denegado.',
       404: 'HTTP 404: No existe la ruta /api/vehiculos.',
       500: 'HTTP 500: Error del servidor o de la conexión con la API Java.',
       502: 'HTTP 502: El servidor intermedio no pudo contactar a Java.',

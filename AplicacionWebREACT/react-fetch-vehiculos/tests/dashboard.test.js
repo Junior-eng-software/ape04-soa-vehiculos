@@ -4,6 +4,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 import { calcularIndicadores, rangoDelPeriodo } from '../src/indicadoresVentas.js';
+import { cargarConsultaDeSesion, crearConsulta } from '../src/consulta.js';
+import { crearSesion, enviarIngreso, iniciarSesion, sesionInicial } from '../src/sesion.js';
 
 const venta = (id, cambios = {}) => ({
   id, vehiculoId: id, compradorId: 1, estado: 'COMPLETADA',
@@ -17,10 +19,12 @@ const vehiculo = (idVehiculo, modelo, marca = 'Marca A') => ({
 let vite;
 let Dashboard;
 let App;
+let PuertaSesion;
+let AvisoSinVentas;
 before(async () => {
   vite = await createServer({ server: { middlewareMode: true, ws: false, watch: null }, appType: 'custom' });
-  ({ default: Dashboard } = await vite.ssrLoadModule('/src/Dashboard.jsx'));
-  ({ default: App } = await vite.ssrLoadModule('/src/App.jsx'));
+  ({ default: Dashboard, AvisoSinVentas } = await vite.ssrLoadModule('/src/Dashboard.jsx'));
+  ({ default: App, PuertaSesion } = await vite.ssrLoadModule('/src/App.jsx'));
 });
 after(async () => vite?.close());
 
@@ -80,8 +84,8 @@ test('presenta un solo día y un solo estado sin depender de múltiples puntos',
 
 test('distingue vacío, carga y error sin mostrar resultados inexistentes', () => {
   const catalogo = { estado: 'inicial' };
-  assert.match(renderDashboard({ estado: 'listo', datos: [] }, catalogo), /No hay ventas visibles/);
-  assert.match(renderDashboard({ estado: 'cargando' }, catalogo), /Cargando ventas/);
+  assert.match(renderDashboard({ estado: 'listo', datos: [] }, catalogo), /No hay ventas registradas/);
+  assert.match(renderDashboard({ estado: 'cargando' }, catalogo), /Cargando resumen…/);
   const error = renderDashboard({ estado: 'error', mensaje: 'HTTP 401: JWT no válido' }, catalogo);
   assert.match(error, /HTTP 401/);
   assert.doesNotMatch(error, /class="diario-barra"|class="dona"/);
@@ -127,12 +131,111 @@ test('muestra inventario con ventas aún sin consultar y omite el porcentaje de 
   assert.doesNotMatch(vacio, /NaN|% de 0/);
 });
 
-test('mantiene las tres vistas y la entrada de JWT manual', () => {
-  const html = renderToStaticMarkup(createElement(App));
-  assert.match(html, /aria-current="page">Dashboard<\/button>/);
-  assert.match(html, />Vehículos<\/button>/);
-  assert.match(html, />Ventas<\/button>/);
-  assert.match(html, /<input id="jwt" type="password"/);
-  assert.match(html, /id="filtroMarca"/);
-  assert.match(html, /Detalle del vehículo/);
+test('en el ingreso se muestran las etiquetas y el formulario; en el área activa se conservan las tres vistas', () => {
+  const ingreso = renderToStaticMarkup(createElement(App));
+  assert.match(ingreso, /Gestión automotriz/);
+  assert.match(ingreso, /<label for="usuario">Usuario<\/label>/);
+  assert.match(ingreso, /<label for="clave">Contraseña<\/label>/);
+  assert.match(ingreso, /<input(?=[^>]*id="usuario")(?=[^>]*autoComplete="username")(?=[^>]*autofocus="")/);
+  assert.match(ingreso, /<input(?=[^>]*id="clave")(?=[^>]*type="password")(?=[^>]*autoComplete="current-password")/);
+  assert.match(ingreso, />Iniciar sesión<\/button>/);
+  assert.doesNotMatch(ingreso, /id="jwt"|Pega el JWT|Navegación principal|Filtros de ventas|Importe completado/);
+
+  const area = renderToStaticMarkup(createElement(PuertaSesion, {
+    estadoSesion: { estado: 'activa', id: 1, identidad: { usuario: 'ana', rol: 'VENDEDOR' } },
+    sesion: {},
+  }));
+  assert.match(area, /aria-current="page">Dashboard<\/button>/);
+  assert.match(area, />Vehículos<\/button>/);
+  assert.match(area, />Ventas<\/button>/);
+  assert.match(area, /id="filtroMarca"/);
+  assert.match(area, /Detalle del vehículo/);
+  assert.match(area, /ana\s*·\s*VENDEDOR/);
+  assert.match(area, />Cerrar sesión<\/button>/);
+  assert.equal((area.match(/Cargando resumen…/g) ?? []).length, 1);
+  assert.doesNotMatch(area, /id="usuario"|Consultar dashboard|Consultar vehículos|Consultar ventas/);
+});
+
+function arnesPuerta(responder) {
+  const llamadas = [];
+  let estadoSesion = sesionInicial;
+  const ejecutarFetch = (ruta, opciones) => {
+    llamadas.push(ruta);
+    return responder(ruta, opciones);
+  };
+  const sesion = crearSesion({
+    publicar: (estado) => { estadoSesion = estado; },
+    autenticar: (usuario, clave, signal, ahora) => iniciarSesion(usuario, clave, signal, ahora, ejecutarFetch),
+  });
+  const vista = () => renderToStaticMarkup(createElement(PuertaSesion, { estadoSesion, sesion }));
+  const cargar = (ruta) => cargarConsultaDeSesion(
+    crearConsulta(() => ejecutarFetch(ruta), () => {}), sesion, estadoSesion.id,
+  );
+  return { sesion, vista, llamadas, cargar };
+}
+
+test('sin sesión no hay consultas de datos y la puerta sigue cerrada mientras se verifica identidad', async () => {
+  const confirmacion = Promise.withResolvers();
+  const identidadSolicitada = Promise.withResolvers();
+  const { sesion, vista, llamadas, cargar } = arnesPuerta((ruta) => {
+    if (ruta === '/auth/login') return Response.json({ access_token: 'token-ficticio', expires_in: 60 });
+    if (ruta === '/api/identidad') {
+      identidadSolicitada.resolve();
+      return confirmacion.promise;
+    }
+    return [];
+  });
+  try {
+    assert.doesNotMatch(vista(), /Navegación principal|dashboard|Filtros de ventas|Importe completado/);
+    await Promise.all([cargar('/api/ventas'), cargar('/api/vehiculos')]);
+    assert.deepEqual(llamadas, []);
+
+    const ingreso = sesion.entrar('ana', 'prueba');
+    await identidadSolicitada.promise;
+    assert.match(vista(), /<button type="submit" disabled="">Iniciando sesión…<\/button>/);
+    assert.doesNotMatch(vista(), /Navegación principal|dashboard|Filtros de ventas|Importe completado/);
+    await Promise.all([cargar('/api/ventas'), cargar('/api/vehiculos')]);
+    assert.deepEqual(llamadas, ['/auth/login', '/api/identidad']);
+
+    await sesion.entrar('ana', 'prueba');
+    assert.deepEqual(llamadas, ['/auth/login', '/api/identidad']);
+    confirmacion.resolve(Response.json({ usuario: 'ana', rolNombre: 'VENDEDOR' }));
+    assert.equal(await ingreso, true);
+    assert.match(vista(), /Navegación principal/);
+    await Promise.all([cargar('/api/ventas'), cargar('/api/vehiculos')]);
+    assert.deepEqual(llamadas, ['/auth/login', '/api/identidad', '/api/ventas', '/api/vehiculos']);
+  } finally {
+    sesion.limpiar();
+  }
+});
+
+test('un rechazo mantiene el usuario, vacía la contraseña, devuelve el foco y muestra una alerta', async () => {
+  const { sesion, vista, llamadas } = arnesPuerta(() =>
+    Response.json({ codigo: 'credenciales' }, { status: 401 }));
+  const usuario = { value: 'ana' };
+  let enfocado = false;
+  const clave = { value: 'dato-ficticio', focus: () => { enfocado = true; } };
+  let enviado = false;
+  const evento = { preventDefault: () => { enviado = true; }, currentTarget: { elements: { usuario, clave } } };
+  await enviarIngreso(evento, sesion);
+  assert.equal(enviado, true);
+  assert.equal(usuario.value, 'ana');
+  assert.equal(clave.value, '');
+  assert.equal(enfocado, true);
+  assert.deepEqual(llamadas, ['/auth/login']);
+  const html = vista();
+  assert.match(html, /role="alert">Usuario o contraseña incorrectos\./);
+  assert.doesNotMatch(html, /Navegación principal|dato-ficticio/);
+});
+
+test('el resumen diferencia una lista vacía de una lista excluida por el filtro', () => {
+  const html = renderDashboard({ estado: 'listo', datos: [] }, { estado: 'listo', datos: { vehiculos: [] } });
+  assert.equal((html.match(/No hay ventas registradas/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /No hay ventas para los filtros seleccionados/);
+  const filtradas = calcularIndicadores([venta(1)], [], { estado: 'FALLIDA' });
+  assert.equal(filtradas.ventasVisibles, 0);
+  const filtrado = renderToStaticMarkup(createElement(AvisoSinVentas, { ventasVisibles: filtradas.ventasVisibles, hayFiltros: true }));
+  assert.match(filtrado, />No hay ventas para los filtros seleccionados<\/p>/);
+  assert.doesNotMatch(filtrado, /No hay ventas registradas/);
+  assert.equal(renderToStaticMarkup(createElement(AvisoSinVentas, { ventasVisibles: 1, hayFiltros: true })), '');
 });

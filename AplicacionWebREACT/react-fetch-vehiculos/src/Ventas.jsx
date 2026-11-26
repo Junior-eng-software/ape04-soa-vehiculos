@@ -1,7 +1,7 @@
 export default function Ventas({ resultado }) {
   const { estado, datos: ventas = [], mensaje } = resultado;
   const avisos = {
-    inicial: 'Pega el JWT y consulta el listado de ventas.',
+    inicial: 'Consulta el listado para ver las ventas.',
     cargando: 'Consultando ventas…',
     listo: ventas.length === 0 ? 'No hay ventas visibles.' : `${ventas.length} ventas visibles.`,
     error: mensaje,

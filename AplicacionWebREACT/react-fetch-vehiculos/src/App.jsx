@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { listarVehiculos } from './api/vehiculosApi.js';
 import { listarVentas } from './api/ventasApi.js';
-import { consultaInicial, crearConsulta } from './consulta.js';
+import { cargarConsultaDeSesion, crearConsulta } from './consulta.js';
+import { crearSesion, enviarIngreso, sesionInicial } from './sesion.js';
 import Dashboard from './Dashboard.jsx';
 import Vehiculos from './Vehiculos.jsx';
 import Ventas from './Ventas.jsx';
@@ -10,49 +11,52 @@ import './App.css';
 
 const vistas = {
   dashboard: {
-    nombre: 'Dashboard', titulo: 'Dashboard de ventas', accion: 'Consultar dashboard',
+    nombre: 'Dashboard', titulo: 'Dashboard de ventas',
     descripcion: 'Ventas visibles para tu sesión e inventario del catálogo.',
   },
   vehiculos: {
-    nombre: 'Vehículos', titulo: 'Catálogo de vehículos', accion: 'Consultar vehículos',
+    nombre: 'Vehículos', titulo: 'Catálogo de vehículos',
     descripcion: 'Busca por marca y selecciona un vehículo para ver su detalle.',
   },
   ventas: {
-    nombre: 'Ventas', titulo: 'Listado de ventas', accion: 'Consultar ventas',
+    nombre: 'Ventas', titulo: 'Listado de ventas',
     descripcion: 'Consulta las ventas autorizadas para tu sesión.',
   },
 };
 
 function useConsulta(cargar) {
-  const [resultado, publicar] = useState(consultaInicial);
+  const [resultado, publicar] = useState({ estado: 'cargando' });
   const [consulta] = useState(() => crearConsulta(cargar, publicar));
-  useEffect(() => consulta.cancelar, [consulta]);
   return [resultado, consulta];
 }
 
-export default function App() {
+function AreaTrabajo({ sesion, id, identidad }) {
   const [vista, setVista] = useState('dashboard');
-  const [token, setToken] = useState('');
-  const [revision, setRevision] = useState(0);
-  const [mostrarToken, setMostrarToken] = useState(false);
   const [vehiculos, consultaVehiculos] = useConsulta(listarVehiculos);
   const [ventas, consultaVentas] = useConsulta(listarVentas);
   const pagina = vistas[vista];
-  const cargando = (vista !== 'ventas' && vehiculos.estado === 'cargando')
-    || (vista !== 'vehiculos' && ventas.estado === 'cargando');
 
-  function cambiarToken(nuevoToken) {
-    if (nuevoToken === token) return;
-    consultaVehiculos.reiniciar();
-    consultaVentas.reiniciar();
-    setToken(nuevoToken);
-    setRevision((actual) => actual + 1);
-  }
+  useEffect(() => {
+    let montada = true;
+    queueMicrotask(() => {
+      if (!montada) return;
+      cargarConsultaDeSesion(consultaVehiculos, sesion, id);
+      cargarConsultaDeSesion(consultaVentas, sesion, id);
+    });
+    return () => {
+      montada = false;
+      consultaVehiculos.cancelar();
+      consultaVentas.cancelar();
+    };
+  }, [sesion, id, consultaVehiculos, consultaVentas]);
 
-  function consultar(evento) {
-    evento.preventDefault();
-    if (vista !== 'ventas') consultaVehiculos.ejecutar(token);
-    if (vista !== 'vehiculos') consultaVentas.ejecutar(token);
+  function reintentar() {
+    if (vista !== 'ventas' && vehiculos.estado === 'error') {
+      cargarConsultaDeSesion(consultaVehiculos, sesion, id);
+    }
+    if (vista !== 'vehiculos' && ventas.estado === 'error') {
+      cargarConsultaDeSesion(consultaVentas, sesion, id);
+    }
   }
 
   return (
@@ -63,10 +67,10 @@ export default function App() {
           <span>Gestión<br className="identidad-salto" /> automotriz</span>
         </div>
         <nav aria-label="Navegación principal">
-          {Object.entries(vistas).map(([id, { nombre }]) => (
-            <button key={id} type="button" onClick={() => setVista(id)}
-              aria-current={vista === id ? 'page' : undefined}>
-              {nombre}
+          {Object.entries(vistas).map(([nombre, vistaActual]) => (
+            <button key={nombre} type="button" onClick={() => setVista(nombre)}
+              aria-current={vista === nombre ? 'page' : undefined}>
+              {vistaActual.nombre}
             </button>
           ))}
         </nav>
@@ -78,41 +82,55 @@ export default function App() {
             <h1>{pagina.titulo}</h1>
             <p>{pagina.descripcion}</p>
           </div>
-          <form onSubmit={consultar}>
-            <fieldset className="sesion">
-              <legend>Sesión</legend>
-              <label htmlFor="jwt">JWT de acceso</label>
-              <div className="linea-token">
-                <input id="jwt" type={mostrarToken ? 'text' : 'password'} autoComplete="off"
-                  spellCheck="false" placeholder="Pega el token sin Bearer"
-                  value={token} onChange={(evento) => cambiarToken(evento.target.value)} />
-                <button type="button" className="secundario" aria-controls="jwt"
-                  onClick={() => setMostrarToken((actual) => !actual)}>
-                  {mostrarToken ? 'Ocultar' : 'Mostrar'}
-                </button>
-              </div>
-              <div className="acciones">
-                <button type="submit" disabled={cargando}>
-                  {cargando ? 'Consultando…' : pagina.accion}
-                </button>
-                <button type="button" className="secundario" disabled={!token}
-                  onClick={() => {
-                    cambiarToken('');
-                    setMostrarToken(false);
-                  }}>
-                  Limpiar token
-                </button>
-              </div>
-            </fieldset>
-          </form>
+          <div className="sesion barra-sesion">
+            <p>{identidad.usuario} · {identidad.rol}</p>
+            <button type="button" className="secundario" onClick={() => sesion.cerrar()}>
+              Cerrar sesión
+            </button>
+          </div>
         </header>
 
-        <div key={revision}>
-          <div hidden={vista !== 'dashboard'}><Dashboard ventas={ventas} catalogo={vehiculos} /></div>
-          <div hidden={vista !== 'vehiculos'}><Vehiculos resultado={vehiculos} /></div>
-          <div hidden={vista !== 'ventas'}><Ventas resultado={ventas} /></div>
+        <div hidden={vista !== 'dashboard'}><Dashboard ventas={ventas} catalogo={vehiculos} reintentar={reintentar} /></div>
+        <div hidden={vista !== 'vehiculos'}>
+          <Vehiculos resultado={vehiculos} />
+          {vehiculos.estado === 'error' && <button type="button" onClick={reintentar}>Reintentar</button>}
+        </div>
+        <div hidden={vista !== 'ventas'}>
+          <Ventas resultado={ventas} />
+          {ventas.estado === 'error' && <button type="button" onClick={reintentar}>Reintentar</button>}
         </div>
       </main>
     </div>
   );
+}
+
+export function PuertaSesion({ estadoSesion, sesion }) {
+  if (estadoSesion.estado === 'activa') {
+    return <AreaTrabajo key={estadoSesion.id} sesion={sesion} id={estadoSesion.id} identidad={estadoSesion.identidad} />;
+  }
+  const verificando = estadoSesion.estado === 'verificando';
+  return (
+    <main className="ingreso">
+      <form className="sesion ingreso-tarjeta" aria-labelledby="titulo-ingreso" aria-busy={verificando}
+        onSubmit={(evento) => enviarIngreso(evento, sesion)}>
+        <p className="ingreso-producto">Gestión automotriz</p>
+        <h1 id="titulo-ingreso">Iniciar sesión</h1>
+        <label htmlFor="usuario">Usuario</label>
+        <input id="usuario" name="usuario" autoComplete="username" autoFocus readOnly={verificando} />
+        <label htmlFor="clave">Contraseña</label>
+        <input id="clave" name="clave" type="password" autoComplete="current-password" readOnly={verificando} />
+        <button type="submit" disabled={verificando}>
+          {verificando ? 'Iniciando sesión…' : 'Iniciar sesión'}
+        </button>
+        {estadoSesion.mensaje && <p className="aviso aviso-error" role="alert">{estadoSesion.mensaje}</p>}
+      </form>
+    </main>
+  );
+}
+
+export default function App() {
+  const [estadoSesion, publicar] = useState(sesionInicial);
+  const [sesion] = useState(() => crearSesion({ publicar }));
+  useEffect(() => sesion.limpiar, [sesion]);
+  return <PuertaSesion estadoSesion={estadoSesion} sesion={sesion} />;
 }

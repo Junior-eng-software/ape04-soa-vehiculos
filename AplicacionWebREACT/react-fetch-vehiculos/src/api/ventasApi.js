@@ -24,9 +24,10 @@ export async function listarVentas(token, signal) {
   if (respuesta.status !== 200) {
     const mensajes = {
       401: 'Falta el JWT o el token ya no es válido.',
-      403: 'El usuario no tiene permiso para consultar ventas.',
+      403: 'Acceso denegado.',
     };
-    throw new Error(`HTTP ${respuesta.status}: ${mensajes[respuesta.status] ?? 'Respuesta inesperada al consultar ventas.'}`);
+    const mensaje = mensajes[respuesta.status] ?? 'Respuesta inesperada al consultar ventas.';
+    throw Object.assign(new Error('HTTP ' + respuesta.status + ': ' + mensaje), { status: respuesta.status });
   }
 
   const ventas = await respuesta.json().catch(() => {

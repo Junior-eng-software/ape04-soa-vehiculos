@@ -18,7 +18,7 @@ export default function Vehiculos({ resultado }) {
   );
   const detalle = seleccionado?.datos === datos ? seleccionado?.vehiculo : null;
   const aviso = {
-    inicial: 'Pega el JWT y consulta el catálogo.',
+    inicial: 'Consulta el catálogo para ver los vehículos.',
     cargando: 'Cargando vehículos…',
     error: mensaje,
     listo: vehiculos.length ? 'No hay vehículos que coincidan con la marca.' : 'El catálogo está vacío.',

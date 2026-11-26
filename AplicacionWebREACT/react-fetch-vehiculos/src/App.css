@@ -111,17 +111,36 @@ input::placeholder { color: var(--muted); }
 select:disabled { color: var(--muted); }
 :focus-visible { outline: 2px solid var(--acento-oscuro); outline-offset: 2px; }
 
-.linea-token, .acciones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-.linea-token input { flex: 1 1 140px; }
 .secundario { background: var(--superficie); border-color: var(--borde); }
-.sesion { margin: 0; padding: 12px 14px 14px; }
 
-.sesion legend {
-  padding-inline: 5px;
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 680;
+.ingreso {
+  display: grid;
+  min-height: 100svh;
+  padding: 20px;
+  place-items: center;
 }
+
+.ingreso-tarjeta {
+  display: grid;
+  width: min(100%, 382px);
+  gap: 8px;
+  padding: clamp(16px, 5vw, 26px);
+}
+
+.ingreso-producto { color: var(--muted); font-weight: 650; }
+.ingreso-tarjeta h1 { font-size: 1.7rem; margin-bottom: 8px; }
+.ingreso-tarjeta input + label, .ingreso-tarjeta button { margin-top: 8px; }
+
+.barra-sesion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-self: end;
+  gap: 8px 12px;
+  padding: 8px 12px;
+}
+
+.barra-sesion p { min-width: 0; overflow-wrap: anywhere; }
 
 .filtros {
   display: flex;

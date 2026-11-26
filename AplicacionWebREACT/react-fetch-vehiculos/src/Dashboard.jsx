@@ -227,7 +227,16 @@ function InventarioPorMarca({ inventario, aviso, error }) {
   );
 }
 
-export default function Dashboard({ ventas, catalogo }) {
+export function AvisoSinVentas({ ventasVisibles, hayFiltros }) {
+  if (ventasVisibles) return null;
+  return (
+    <p className="aviso aviso-dashboard">
+      {hayFiltros ? 'No hay ventas para los filtros seleccionados' : 'No hay ventas registradas'}
+    </p>
+  );
+}
+
+export default function Dashboard({ ventas, catalogo, reintentar }) {
   const [periodo, setPeriodo] = useState('');
   const [estado, setEstado] = useState('');
   const estados = useMemo(() => [
@@ -238,14 +247,16 @@ export default function Dashboard({ ventas, catalogo }) {
     const rango = periodo ? rangoDelPeriodo(Number(periodo)) : {};
     return calcularIndicadores(ventas.datos ?? [], catalogo.datos?.vehiculos, { estado: estadoActivo, ...rango });
   }, [ventas.datos, catalogo.datos, periodo, estadoActivo]);
+  if (ventas.estado === 'cargando' || catalogo.estado === 'cargando') {
+    return <p className="aviso aviso-dashboard" role="status">Cargando resumen…</p>;
+  }
   const datos = ventas.estado === 'listo' ? indicadores : null;
   const aviso = {
-    inicial: 'Pega el JWT y consulta el dashboard.',
-    cargando: 'Cargando ventas…',
+    inicial: 'Consulta el dashboard para ver los datos.',
     error: ventas.mensaje,
-    listo: datos?.ventasVisibles ? '' : 'No hay ventas visibles para estos filtros.',
   }[ventas.estado];
-  const avisoGrafico = ventas.estado === 'error' ? 'Datos de ventas no disponibles.' : aviso;
+  const avisoGrafico = { error: 'Datos de ventas no disponibles.', inicial: aviso }[ventas.estado];
+  const errorConsulta = ventas.estado === 'error' || catalogo.estado === 'error';
   const avisoCatalogo = {
     inicial: 'Consulta el catálogo para cruzar las marcas.',
     cargando: 'Cargando catálogo…',
@@ -274,8 +285,10 @@ export default function Dashboard({ ventas, catalogo }) {
       </section>
       <div role="status" aria-live="polite">
         {aviso && <p className={`aviso aviso-dashboard${ventas.estado === 'error' ? ' aviso-error' : ''}`}>{aviso}</p>}
+        {datos && <AvisoSinVentas ventasVisibles={datos.ventasVisibles} hayFiltros={Boolean(periodo || estadoActivo)} />}
         {datos?.ventasVisibles > 0 && <span className="solo-lectores">{numero.format(datos.ventasVisibles)} ventas visibles.</span>}
       </div>
+      {errorConsulta && <button className="secundario aviso-dashboard" type="button" onClick={reintentar}>Reintentar</button>}
       <Indicadores datos={datos} inventario={indicadores.inventario} estadoCatalogo={catalogo.estado} />
       {lider && (
         <p className="modelo-lider">

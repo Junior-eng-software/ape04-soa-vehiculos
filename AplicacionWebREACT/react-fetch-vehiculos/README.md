@@ -1,52 +1,23 @@
-# Cliente Web — React + Vite
+# Cliente web React
 
-**Autor:** Javier Vargas
+Requiere Node.js 24 y NGINX. Instala las dependencias declaradas con `npm ci`.
 
-## 1. Software necesario
+## Arranque para la defensa
 
-- Windows 10 u 11 y Visual Studio Code.
-- Node.js 24 LTS con npm.
-- API Java Spring Boot en `http://127.0.0.1:8080`.
-- JWT válido para consultar el catálogo.
-
-## 2. Preparar el proyecto
-
-1. Se descarga o clona `soa-react` y se abre la carpeta que contiene `package.json`.
-2. Se verifica Node.js y npm:
+Carga las dos variables del cliente OAuth ordinario en la misma terminal que inicia Vite. El proceso de Vite usa las variables `REACT_OAUTH_CLIENT_ID` y `REACT_OAUTH_CLIENT_SECRET` para autenticar el proxy de login. Define `REACT_GATEWAY_URL` si debes usar un NGINX de ensayo distinto del local en 8090.
 
 ```powershell
-node -v
-npm -v
+. 'C:\ensayo\cargar_cliente.ps1'
+npm run dev -- --host 127.0.0.1 --port 5174 --strictPort
 ```
 
-3. Se instalan las dependencias declaradas:
+Abre `http://127.0.0.1:5174/` e inicia sesión con tu usuario y contraseña. La sesión muestra el usuario y el rol, y permite consultar el dashboard, el catálogo o las ventas. **Cerrar sesión** limpia los resultados de la sesión.
+
+## Compilación y pruebas
 
 ```powershell
-npm ci
-```
-
-## 3. Compilar
-
-```powershell
+node --test tests/*.test.js
 npm run build
 ```
 
-Los archivos listos para publicación quedan en `dist`.
-
-## 4. Ejecutar en desarrollo
-
-```powershell
-npm run dev
-```
-
-Se abre `http://localhost:5173` en el navegador. Vite reenvía `/api` hacia Java en el puerto `8080`.
-
-## 5. Comprobar
-
-1. Se obtiene un JWT válido desde el servicio Java.
-2. Se pega el token en la pantalla y se presiona **Consultar vehículos**.
-3. Se comprueba el listado, el filtro por marca y el detalle al seleccionar un vehículo.
-4. Para ver la compilación local se ejecuta `npm run preview` y se abre `http://localhost:4173`.
-5. Se detiene el servidor con `Ctrl + C`.
-
-> El proxy configurado por Vite corresponde a ejecución local; el despliegue en otro servidor requiere configurar el enrutamiento de `/api`.
+`dist` contiene los archivos estáticos. El endpoint `/auth/login` existe en el servidor de desarrollo de Vite. Para la defensa usa el arranque anterior.
